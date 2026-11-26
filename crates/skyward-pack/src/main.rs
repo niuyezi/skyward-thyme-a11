@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 mod avb;
 mod described;
 
-use skyward_bootimg::{BootImage, Ramdisk};
+use skyward_bootimg::{BootImage, Compression, Ramdisk};
 
 /// Builds Skyward recovery images from a device's own stock images.
 #[derive(Parser)]
@@ -68,6 +68,17 @@ enum Cmd {
         /// The monospaced typeface's licence, which goes with it.
         #[arg(long)]
         mono_license: PathBuf,
+        /// The partition the image is for, named in its AVB footer. A phone
+        /// whose recovery runs from its boot partition, as Android 11 phones
+        /// do, takes `boot`.
+        #[arg(long, default_value = "recovery")]
+        partition: String,
+        /// Build on a boot partition's image rather than a recovery's: the
+        /// same ramdisk also starts the installed system, so the property
+        /// file is left as the phone's build wrote it and none of the
+        /// recovery's own properties are added.
+        #[arg(long)]
+        as_boot: bool,
         #[arg(long)]
         out: PathBuf,
     },
@@ -117,7 +128,8 @@ fn main() -> Result<()> {
         }
         Cmd::Repack { image, out } => {
             let mut img = BootImage::read(&image)?;
-            img.ramdisk = Ramdisk::decode(&img.ramdisk)?.encode()?;
+            let compression = Compression::of(&img.ramdisk);
+            img.ramdisk = Ramdisk::decode(&img.ramdisk)?.encode_with(compression)?;
             write(&out, &img, &img.to_bytes()?)
         }
         Cmd::Boot { kernel, ramdisk, out } => {
@@ -125,9 +137,12 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, out } => {
+        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
+            // The ramdisk is written back compressed the way the phone's own
+            // kernel reads it: gzip on a 4.19 kernel that has no LZ4.
+            let compression = Compression::of(&img.ramdisk);
             let mut rd = Ramdisk::decode(&img.ramdisk)?;
             // A stock recovery ramdisk has no third-party tree; refuse to build
             // on top of another custom recovery.
@@ -161,16 +176,23 @@ fn main() -> Result<()> {
             // one. update_engine refuses a package built before the recovery
             // itself unless both of the last two are set; the recovery checks
             // packages against the installed system instead.
-            let stock_props = &rd
-                .find(paths::PROP_DEFAULT)
-                .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
-                .data;
-            let mut props = without(stock_props, &BUILD_VERSION);
-            props.extend_from_slice(b"\nro.secure=0\nro.adb.secure=0\nro.debuggable=1\nro.ota.allow_downgrade=true\n");
-            rd.replace(paths::PROP_DEFAULT, props)?;
-            img.ramdisk = rd.encode()?;
+            //
+            // A boot partition's ramdisk starts the installed system too, so
+            // none of this is done to it: the build properties stay as the
+            // phone's build wrote them, or the system would come up
+            // debuggable and with adb needing no authorization.
+            if !as_boot {
+                let stock_props = &rd
+                    .find(paths::PROP_DEFAULT)
+                    .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
+                    .data;
+                let mut props = without(stock_props, &BUILD_VERSION);
+                props.extend_from_slice(b"\nro.secure=0\nro.adb.secure=0\nro.debuggable=1\nro.ota.allow_downgrade=true\n");
+                rd.replace(paths::PROP_DEFAULT, props)?;
+            }
+            img.ramdisk = rd.encode_with(compression)?;
             let bytes = img.to_bytes()?;
-            write(&out, &img, &avb::footed(&bytes, "recovery", size, &Sha256::digest(&bytes))?)
+            write(&out, &img, &avb::footed(&bytes, &partition, size, &Sha256::digest(&bytes))?)
         }
         Cmd::Stock { config, out } => {
             let stock = skyward_config::DeviceConfig::load(&config)?.stock.with_context(|| format!("{} names no stock build", config.display()))?;
