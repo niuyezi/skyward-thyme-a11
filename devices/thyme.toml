@@ -1,0 +1,123 @@
+[device]
+codename = "thyme"
+brand = "Xiaomi"
+model = "Xiaomi 10S"
+ab = true
+soc = { hans = "高通骁龙®870移动平台", hant = "Qualcomm Snapdragon® 870 行動平台", en = "Qualcomm Snapdragon® 870 Mobile Platform" }
+os_version_prop = "ro.build.version.incremental"
+
+[display]
+width = 1080
+height = 2340
+density = 440
+diagonal = 6.67
+# The radius the stock settings round a page's corners to as it slides in.
+corner_radius = 90
+
+[modules]
+# A phone whose kernel is 4.19, before GKI: its modules are all on the
+# vendor partition, and there is no vendor_dlkm or system_dlkm to look in.
+# The panel's and the touchscreen's drivers are built into this kernel, so
+# nothing has to be loaded before the screen and the touches come up.
+sources = ["vendor"]
+load = []
+
+# The FocalTech FTS controller behind Xiaomi's touch layer, which is built
+# into the kernel: the touches come in on /dev/xiaomi-touch. The driver
+# resets the controller as it connects to it, and it comes back sending only
+# raw frames, which the system's touch algorithm turns into touches; a
+# recovery runs none of that. Told through Xiaomi's touch layer, the driver
+# has the controller report positions itself.
+[touch]
+writes = [{ path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" }]
+
+# The firmware of the WLAN chip, and the apps the secure world runs, are on
+# the modem partition, which the phone mounts at /vendor/firmware_mnt and
+# its own recovery leaves unmounted.
+[firmware]
+partition = "modem"
+
+# The persist partition, which the phone mounts at /mnt/vendor/persist and
+# its own recovery leaves unmounted. The secure world keeps its own files
+# there, through a listener qseecomd registers: among them what the key
+# service needs to use a key that cannot be rolled back, such as the one
+# guarding each user's secret. The WLAN's MAC address is there as well.
+[partitions]
+mounted = ["persist"]
+
+# What the phone's own init runs once the system has finished starting: the
+# kernel starts both CPU clusters on the performance governor, which holds
+# them at their highest clock, and Qualcomm's idle driver keeps idle CPUs
+# from powering down until it is told otherwise. The script hands the
+# clusters to WALT and lets idle CPUs power down. Without it the CPUs stay
+# at their highest clock and voltage even while idle, and the phone slowly
+# heats up.
+[[service]]
+path = "/vendor/bin/sh"
+args = ["/vendor/bin/init.kernel.post_boot.sh"]
+libraries = ["/system/lib64", "/vendor/lib64"]
+oneshot = true
+user = "root"
+groups = ["root", "system", "wakelock", "graphics"]
+
+# WLAN: the QCA6391 on PCIe, driven by qca_cld3_wlan over the cnss2 platform
+# driver. Once fs_ready is written, cnss2 powers the chip up and loads its
+# firmware from the modem partition, and wlan0 appears. wpa_supplicant runs
+# on the recovery's own libraries before the vendor partition's: the vendor
+# partition carries its own copies of the lowest of them, and a program
+# loading those would not be understood by the recovery's service directory.
+[wlan]
+modules = ["qca_cld3_wlan"]
+writes = [{ path = "/sys/kernel/cnss/fs_ready", value = "1" }]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/system/lib64", "/vendor/lib64"]
+service = "android.hardware.wifi.supplicant.ISupplicant/default"
+probe = "http://connect.rom.miui.com/generate_204"
+
+# The update server the stock updater of the Chinese system asks.
+[update]
+server = "https://update.miui.com/updates/miotaV3.php"
+
+# This phone's recovery runs from its boot partition: Android 11 packs the
+# recovery into the boot image's ramdisk rather than a partition of its own,
+# and the image this is built on is that boot image, not a stock recovery.
+# `skyward-pack recovery --as-boot --partition boot` builds it, and the
+# configuration names no stock build for it to be taken out of a package.
+
+# qcom-hv-haptics, which says the motor's resonant frequency in
+# lra_frequency_hz. The click is made from samples at that frequency.
+[haptics]
+resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
+strength = { lightest = 0.25, strongest = 0.75 }
+
+# The partitions a backup of the baseband and EFS takes: the baseband's
+# settings, with the IMEI, and the sensors' calibration. And what of the
+# data partition a backup leaves out because the secure world keeps it in
+# step with itself: its own storage, its apps' data, that of Xiaomi's own
+# trusted environment, and the fingerprint templates.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+data_skipped = [
+    "vendor/tzstorage",
+    "vendor/qtee",
+    "vendor/mitee",
+    "vendor/goodix",
+    "vendor/fingerprint",
+    "vendor/fpdata",
+    "vendor/misc/mi_fp",
+]
+
+# Where the phone's own programs keep logs in the data partition.
+[wipe]
+logs = [
+    "/data/miuilog",
+    "/data/vendor/diag",
+    "/data/vendor/bsplog",
+    "/data/vendor/log",
+    "/data/vendor/ramdump",
+    "/data/vendor/ramdump_ssr",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+    "/data/vendor/wlan_logs",
+]
