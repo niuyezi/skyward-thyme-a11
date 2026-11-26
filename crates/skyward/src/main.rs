@@ -532,6 +532,17 @@ fn load_modules(cfg: &DeviceConfig, names: &[String]) -> Result<Vec<PathBuf>> {
 /// be made out, the phone's devices are up before that is said.
 #[cfg(target_os = "android")]
 fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Found>) -> Result<()> {
+    // The binder driver is a filesystem of its own on this kernel, and a
+    // recovery runs no ueventd of the phone's own to mount it. The key
+    // service, which opens the data partition, and the WLAN's supplicant
+    // reach each other over the nodes it holds, so it is mounted here
+    // before anything opens one.
+    let binderfs = Path::new("/dev/binderfs");
+    if !binderfs.join("binder").exists() {
+        std::fs::create_dir_all(binderfs).with_context(|| format!("make {}", binderfs.display()))?;
+        skyward_block::mount::mount(Path::new("binder"), binderfs, "binder", &[])?;
+        skyward_sys::kmsg("binderfs is mounted on /dev/binderfs")?;
+    }
     let nodes = skyward_sys::ueventd::apply()?;
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
     let props = skyward_info::installed_props(slot)?;
