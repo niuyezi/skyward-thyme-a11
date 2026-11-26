@@ -1,0 +1,147 @@
+name: Build thyme (Xiaomi 10S, Android 11)
+
+# thyme's recovery runs from its boot partition: Android 11 packs the
+# recovery into the boot image's ramdisk rather than a partition of its own,
+# and Xiaomi's full update package for this phone carries no recovery
+# partition for skyward-pack to take out. The image is built on a clean boot
+# partition image, which is published as a release asset rather than
+# committed: it is 192 MiB, past what a repository holds.
+#
+# The stock boot image is fetched from the release this workflow names, its
+# SHA-256 checked, and skyward-pack builds on it with --as-boot so the
+# ramdisk's property file is left as Xiaomi wrote it: the same ramdisk also
+# starts the installed system, and ro.secure=0 would make that system
+# debuggable with adb needing no authorization.
+#
+# Run by hand: Actions > Build thyme > Run workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      boot_asset:
+        description: URL of the stock boot.img release asset
+        required: true
+        default: https://github.com/niuyezi/skyward-thyme-a11/releases/download/stock-boot/boot.img
+      boot_sha256:
+        description: SHA-256 of that image, in lowercase hex
+        required: true
+        default: ""
+  push:
+    paths:
+      - ".github/workflows/build-thyme.yml"
+      - "devices/thyme.toml"
+      - "crates/**"
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  tools:
+    name: Build the recovery service and the packer
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Build the recovery service for the phone
+        run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward
+      - name: Build the second system's first program, static
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo ndk -t arm64-v8a --platform 30 build --locked --release -p skyward-system-init --target-dir target/system-init
+      - name: Build the packer
+        run: cargo build --locked --release -p skyward-pack
+      - name: Gather them
+        run: |
+          mkdir tools
+          cp target/aarch64-linux-android/release/skyward target/release/skyward-pack tools/
+          cp target/system-init/aarch64-linux-android/release/system-init tools/
+      - uses: actions/upload-artifact@v7
+        with:
+          name: thyme-tools
+          path: tools/
+          if-no-files-found: error
+          retention-days: 1
+
+  pack:
+    name: Pack the recovery
+    needs: [tools]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: thyme-tools
+          path: tools
+      - name: Make the tools runnable
+        run: chmod +x tools/skyward tools/skyward-pack
+
+      - name: Fetch the stock boot image
+        env:
+          BOOT_URL: ${{ inputs.boot_asset || 'https://github.com/niuyezi/skyward-thyme-a11/releases/download/stock-boot/boot.img' }}
+        run: |
+          mkdir -p stock
+          curl -fL --retry 3 --retry-delay 5 -o stock/boot.img "$BOOT_URL"
+          ls -l stock/boot.img
+
+      - name: Check the image's SHA-256
+        env:
+          WANT: ${{ inputs.boot_sha256 }}
+        run: |
+          got=$(sha256sum stock/boot.img | cut -d' ' -f1)
+          echo "sha256 = $got"
+          if [ -n "$WANT" ]; then
+            echo "$WANT  stock/boot.img" | sha256sum --check --status \
+              || { echo "::error::the image's SHA-256 is $got, not $WANT"; exit 1; }
+            echo "the SHA-256 is the one given"
+          else
+            echo "::warning::no SHA-256 given; the image was not checked"
+          fi
+
+      - name: Say what the stock image holds
+        run: |
+          tools/skyward-pack list stock/boot.img | head -20
+          echo "---"
+          tools/skyward-pack cat stock/boot.img prop.default | grep -E '^ro\.(build|system|vendor)\.' | head -20 || true
+
+      - name: Pack Skyward onto the boot partition
+        id: pack
+        run: |
+          version="${GITHUB_SHA::7}"
+          name="skyward-$version-thyme-ANXIN-12.5.3"
+          tools/skyward-pack recovery \
+            --stock stock/boot.img \
+            --binary tools/skyward \
+            --system-init tools/system-init \
+            --config devices/thyme.toml \
+            --font resources/fonts/MiSansVF.ttf \
+            --mono resources/fonts/KirkMono-Regular.ttf \
+            --mono-license resources/fonts/KirkMono-OFL.txt \
+            --partition boot \
+            --as-boot \
+            --out "out/$name.img"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Check the image can be read back
+        env:
+          NAME: ${{ steps.pack.outputs.name }}
+        run: |
+          tools/skyward-pack list "out/$NAME.img" | tail -5
+          echo "--- footer ---"
+          tail -c 64 "out/$NAME.img" | head -c 4; echo
+
+      - name: Zip the image
+        working-directory: out
+        env:
+          NAME: ${{ steps.pack.outputs.name }}
+        run: |
+          zip -9 "$NAME.zip" "$NAME.img"
+          sha256sum "$NAME.img" "$NAME.zip" | tee SHA256SUMS
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: skyward-thyme
+          path: out/
+          if-no-files-found: error
+          retention-days: 30
