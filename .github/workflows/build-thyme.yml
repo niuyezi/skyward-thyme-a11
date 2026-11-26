@@ -110,6 +110,7 @@ jobs:
         run: |
           version="${GITHUB_SHA::7}"
           name="skyward-$version-thyme-ANXIN-12.5.3"
+          mkdir -p out
           tools/skyward-pack recovery \
             --stock stock/boot.img \
             --binary tools/skyward \
