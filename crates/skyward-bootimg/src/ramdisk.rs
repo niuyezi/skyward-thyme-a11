@@ -85,7 +85,7 @@ impl Ramdisk {
             Compression::Gzip => flate2::read::GzDecoder::new(compressed)
                 .read_to_end(&mut cpio)
                 .context("gzip decode")?,
-        }
+        };
         let mut entries = Vec::new();
         let mut rest = Cursor::new(cpio.as_slice());
         loop {
