@@ -36,6 +36,31 @@ const S_IFSOCK: u32 = 0o140000;
 /// in system/bin that stand for toybox.
 const LINK_MODE: u32 = 0o755;
 
+/// How a boot image's ramdisk is compressed. The kernel's initramfs unpacker
+/// takes what its own build enabled: a GKI phone takes LZ4, and a phone whose
+/// kernel predates it, as Android 11's 4.19 kernels do, takes gzip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Compression {
+    /// LZ4 in legacy framing, as AOSP packs boot ramdisks.
+    Lz4,
+    /// gzip, as Android 11 and earlier pack boot ramdisks.
+    Gzip,
+}
+
+impl Compression {
+    /// The compression `compressed` is in, told by its first bytes. Nothing
+    /// that says otherwise is taken for gzip, which is what a phone whose
+    /// kernel predates LZ4 carries.
+    pub fn of(compressed: &[u8]) -> Compression {
+        // LZ4 legacy framing starts 0x04 0x22 0x4d 0x18.
+        if compressed.starts_with(&[0x04, 0x22, 0x4d, 0x18]) {
+            Compression::Lz4
+        } else {
+            Compression::Gzip
+        }
+    }
+}
+
 impl Entry {
     pub fn is_dir(&self) -> bool {
         self.mode & S_IFMT == S_IFDIR
@@ -49,11 +74,20 @@ pub struct Ramdisk {
 }
 
 impl Ramdisk {
-    /// Unpack an LZ4 (legacy framing) compressed newc archive, as Android
-    /// boot images carry.
+    /// Unpack a compressed newc archive, as Android boot images carry: LZ4 in
+    /// legacy framing, or gzip on a phone whose kernel predates LZ4.
     pub fn decode(compressed: &[u8]) -> Result<Self> {
         let mut cpio = Vec::new();
-        lz4_flex::frame::FrameDecoder::new(compressed).read_to_end(&mut cpio).context("lz4 decode")?;
+        match Compression::of(compressed) {
+            Compression::Lz4 => lz4_flex::frame::FrameDecoder::new(compressed)
+                .read_to_end(&mut cpio)
+                .context("lz4 decode")?,
+            Compression::Gzip => {
+                flate2::read::GzDecoder::new(compressed)
+                    .read_to_end(&mut cpio)
+                    .context("gzip decode")?;
+            }
+        }
         let mut entries = Vec::new();
         let mut rest = Cursor::new(cpio.as_slice());
         loop {
@@ -84,7 +118,24 @@ impl Ramdisk {
     /// with the reference `lz4` tool in legacy framing (the kernel's initramfs
     /// unpacker reads no other LZ4 framing) at its highest compression.
     pub fn encode(&self) -> Result<Vec<u8>> {
-        lz4_tool(&self.archive()?)
+        self.encode_with(Compression::Lz4)
+    }
+
+    /// Pack as a newc archive compressed `compression`: LZ4 in legacy framing
+    /// through the reference `lz4` tool, or gzip for a kernel that reads only
+    /// that. The phone's own ramdisk is written back the way it came.
+    pub fn encode_with(&self, compression: Compression) -> Result<Vec<u8>> {
+        let cpio = self.archive()?;
+        match compression {
+            Compression::Lz4 => lz4_tool(&cpio),
+            Compression::Gzip => {
+                let mut out = Vec::new();
+                let mut e = flate2::write::GzEncoder::new(&mut out, flate2::Compression::best());
+                e.write_all(&cpio).context("gzip encode")?;
+                e.finish().context("gzip encode")?;
+                Ok(out)
+            }
+        }
     }
 
     /// Pack as a newc archive, uncompressed.
