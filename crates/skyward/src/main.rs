@@ -622,6 +622,10 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
     let mut told = registering.clone();
     told.extend(described.into_iter().filter(|name| !registering.contains(name)));
     if !told.is_empty() {
+        // The recovery's own init starts no service of the phone's, so the
+        // directory the descriptions are told to is the recovery's to start
+        // first; where the phone's own init runs it, this asks nothing of it.
+        secure::start_service_directory()?;
         secure::publish_descriptions(&told)?;
         skyward_sys::kmsg(&format!("the service directory is told of {} of the phone's own services", told.len()))?;
     }

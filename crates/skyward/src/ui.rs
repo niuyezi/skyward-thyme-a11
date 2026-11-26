@@ -1264,7 +1264,7 @@ impl<'a> Pages<'a> {
         untaken(&mut unread.battery, "the battery", battery.as_ref().err())?;
         let info = skyward_info::collect_with(cfg, battery.unwrap_or_default())?;
         let fonts = Fonts::load(font, 0, mono)?;
-        let mut surface = KmsSurface::open("/dev/dri/card0")?;
+        let mut surface = KmsSurface::open_capped("/dev/dri/card0", cfg.display.refresh_hz)?;
         let (w, h) = surface.size();
         // A touch controller that follows the panel wakes as the panel goes
         // from rest to running, and at no other time. The recovery service
@@ -1301,6 +1301,7 @@ impl<'a> Pages<'a> {
         };
         let mut app = App::new(first, w, h, cfg.display.density as f32 / 160.0);
         app.set_screen_corners(cfg.display.corner_radius as f32);
+        app.clock_x_dp = cfg.display.clock_x_dp;
         // The settings kept from the starts before are back before the first
         // frame, and before file transfer starts with its switch and the time
         // zone. The pages speak the language chosen then, or else the one the

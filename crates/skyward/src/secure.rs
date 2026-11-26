@@ -193,6 +193,52 @@ fn image(file: &Path) -> Result<(u64, u64)> {
     Ok((start, entry.size()))
 }
 
+/// What the service directory needs before it will run inside a recovery:
+/// the libraries it asks its loader for, which the recovery's own folders
+/// do not carry, copied beside the recovery's own where its loader finds
+/// them; and the directory itself, running. The phone's own init knows the
+/// service and is asked to start it, as its own scripts do; where the
+/// init of this recovery starts no service of the phone's, the recovery
+/// starts the program itself and keeps it running, as init keeps it, for
+/// the phone's own programs to register with. A directory already running,
+/// as one an earlier run of the recovery service started, is left as it is.
+pub fn start_service_directory() -> Result<()> {
+    if crate::services::running(DIRECTORY_PROGRAM).is_some() {
+        return Ok(());
+    }
+    let program = Path::new(DIRECTORY_PROGRAM);
+    ensure!(program.is_file(), "{DIRECTORY_PROGRAM} is missing; is its partition mounted?");
+    // The loader looks in its own folders alone, and the recovery's own
+    // /system is a folder of the recovery's that carries none of the
+    // installed system's libraries: each one the directory asks for is
+    // copied into it from the installed system's own folder, where the
+    // loader of the directory finds it, whoever starts the directory.
+    let loader: Vec<PathBuf> = skyward_programs::loaded::OWN_FOLDERS.iter().map(PathBuf::from).collect();
+    let installed = Path::new("/mnt/system/system/lib64");
+    let beyond = skyward_programs::loaded::beyond(program, &loader, &[installed.to_path_buf()], &loader[0])?;
+    for library in &beyond.elsewhere {
+        crate::services::place(library, &loader[0])?;
+        skyward_sys::kmsg(&format!("{} is at {} for the service directory", library.display(), loader[0].display()))?;
+    }
+    for name in &beyond.nowhere {
+        skyward_sys::kmsg(&format!("the service directory asks for {name}, which none of its folders has"))?;
+    }
+    // The phone's own init starts the directory where its scripts ask it
+    // to; a recovery's own init may know the service and start nothing.
+    let _ = skyward_sys::set_prop("ctl.start", DIRECTORY_SERVICE);
+    let until = Instant::now() + REGISTER_TIMEOUT;
+    while Instant::now() < until {
+        if crate::services::reachable() {
+            return skyward_sys::kmsg("the service directory runs, started by init");
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let mut service = skyward_config::Service { path: DIRECTORY_PROGRAM.to_string(), ..Default::default() };
+    service.libraries.push(installed.to_string_lossy().into_owned());
+    crate::services::start(&[skyward_programs::secure::Started::from(service)], None)?;
+    skyward_sys::kmsg("the service directory runs, started by the recovery")
+}
+
 /// Tell the phone's service directory of the services in `wanted`, which
 /// the phone's own programs register and the recovery itself may serve.
 /// The directory turns away a hardware service the running system does

@@ -12,6 +12,7 @@ impl App {
         let battery = info.battery.as_ref();
         Bar {
             clock,
+            clock_x_dp: self.clock_x_dp,
             battery: battery.map(|b| (b.level, b.charging().then_some(if b.quick { Bolt::Quick } else { Bolt::Charging }))),
             wlan: self.wlan_mark(),
             data: match self.state.data {

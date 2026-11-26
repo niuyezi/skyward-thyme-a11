@@ -1197,6 +1197,9 @@ pub struct App {
     w: u32,
     h: u32,
     px_per_dp: f32,
+    /// Where the clock starts, in dp from the screen's left edge, where a
+    /// camera hole in that corner covers where it starts by default.
+    pub clock_x_dp: Option<f32>,
 }
 
 impl App {
@@ -1263,6 +1266,7 @@ impl App {
             w,
             h,
             px_per_dp,
+            clock_x_dp: None,
         }
     }
 

@@ -253,6 +253,9 @@ pub(crate) fn wrap(c: &Canvas, face: &Face, text: &str, px: f32, max_w: f32) -> 
 /// past it.
 pub struct Bar<'a> {
     pub clock: &'a str,
+    /// Where the clock starts, in dp from the screen's left edge, where a
+    /// camera hole in that corner covers where it starts by default.
+    pub clock_x_dp: Option<f32>,
     pub battery: Option<(u8, Option<Bolt>)>,
     /// The network joined, while it has an address.
     pub wlan: Option<WlanMark>,
@@ -293,12 +296,12 @@ pub const LOW_BATTERY: u8 = 20;
 /// joined and how fast data goes over it, the data partition's lock, the
 /// slot in a tag as the stock bar tags a VPN, and the battery's temperature
 /// in figures over their unit as the stock bar gives a speed. `ink` colours
-/// the clock and every mark but the battery.
+/// the clock and every mark but the battery. Where a camera hole in the
+/// screen's left corner covers where the clock starts, `bar.clock_x_dp`
+/// starts it to the right of the hole instead.
 pub fn status_bar(c: &mut Canvas, t: &Theme, f: &Fonts, bar: &Bar, ink: Rgba) {
     let m = &t.m;
     let cy = m.status_cy;
-    // Digits carry no descender, so centre on half their height (≈0.72 em).
-    c.text(&f.status, bar.clock, m.status_x, cy + m.status_px * 0.36, m.status_px, ink, None);
     let mut right = m.w as f32 - m.status_right;
     if let Some((level, charging)) = bar.battery {
         if let Some(kind) = charging {
@@ -335,6 +338,11 @@ pub fn status_bar(c: &mut Canvas, t: &Theme, f: &Fonts, bar: &Bar, ink: Rgba) {
     if let Some(w) = &bar.wlan {
         speed(c, t, f, &w.speed, w.unit, left - gap, cy, ink);
     }
+    // The clock starts where the screen's own corner keeps the stock bar's
+    // clock, or to the right of a camera hole that covers that place.
+    // Digits carry no descender, so centre on half their height (≈0.72 em).
+    let x = bar.clock_x_dp.map_or(m.status_x, |dp| m.dp(dp));
+    c.text(&f.status, bar.clock, x, cy + m.status_px * 0.36, m.status_px, ink, None);
 }
 
 /// Room between the marks on the bar's right, as the stock bar leaves it
@@ -3033,7 +3041,7 @@ mod tests {
         let f = crate::font::bundled();
         let draw = |mark: WlanMark| {
             let mut c = Canvas::filled(1200, 160, t.pal.bg);
-            let bar = Bar { clock: "01:27", battery: Some((40, Some(Bolt::Charging))), wlan: Some(mark), data: None, slot: None, temp: None };
+            let bar = Bar { clock: "01:27", clock_x_dp: None, battery: Some((40, Some(Bolt::Charging))), wlan: Some(mark), data: None, slot: None, temp: None };
             status_bar(&mut c, &t, &f, &bar, t.pal.status);
             c
         };
@@ -3071,7 +3079,7 @@ mod tests {
         let f = crate::font::bundled();
         let mut c = Canvas::filled(1200, 160, t.pal.bg);
         let wlan = Some(WlanMark { level: 3, receiving: true, sending: true, speed: "0.00".into(), unit: "KB/s" });
-        let bar = Bar { clock: "01:27", battery: Some((40, None)), wlan, data: Some(false), slot: Some("B"), temp: Some(362) };
+        let bar = Bar { clock: "01:27", clock_x_dp: None, battery: Some((40, None)), wlan, data: Some(false), slot: Some("B"), temp: Some(362) };
         status_bar(&mut c, &t, &f, &bar, t.pal.status);
         // Runs of inked columns on the bar's right half, those a few pixels
         // apart taken as one mark.
@@ -3143,7 +3151,7 @@ mod tests {
         let f = crate::font::bundled();
         let draw = |kind| {
             let mut c = Canvas::filled(1200, 160, Rgba::rgb(0, 0, 0));
-            let bar = Bar { clock: "01:27", battery: Some((64, Some(kind))), wlan: None, data: None, slot: None, temp: None };
+            let bar = Bar { clock: "01:27", clock_x_dp: None, battery: Some((64, Some(kind))), wlan: None, data: None, slot: None, temp: None };
             status_bar(&mut c, &t, &f, &bar, t.pal.status);
             c
         };

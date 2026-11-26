@@ -301,6 +301,15 @@ pub struct Display {
     /// sliding over another rounds its leading corners to it.
     #[serde(default)]
     pub corner_radius: u32,
+    /// The refresh the panel is driven at, where it is not its fastest:
+    /// a panel that shows artefacts at the mode the recovery would pick
+    /// runs at this one instead.
+    #[serde(default)]
+    pub refresh_hz: Option<u32>,
+    /// Where the clock starts, in dp from the screen's left edge, where a
+    /// camera hole in that corner covers where it starts by default.
+    #[serde(default)]
+    pub clock_x_dp: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -345,7 +354,7 @@ pub struct Partitions {
 /// A program from the phone's own partitions that the recovery keeps
 /// running, such as the touch processing of a panel that hands raw frames
 /// to the host.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
 pub struct Service {
     pub path: String,
     /// What the program is given after its own path, as init gives a

@@ -13,6 +13,13 @@ density = 440
 diagonal = 6.67
 # The radius the stock settings round a page's corners to as it slides in.
 corner_radius = 90
+# The panel shows snow-like bands across its lower half at the 90 Hz mode
+# this MIUI build's dtbo leaves it; the stock system drives it at 60 Hz,
+# and at 60 Hz the bands do not show.
+refresh_hz = 60
+# The camera hole sits in the screen's top left corner, over where the
+# clock starts by default; the clock starts to the right of the hole.
+clock_x_dp = 40.0
 
 [modules]
 # A phone whose kernel is 4.19, before GKI: its modules are all on the

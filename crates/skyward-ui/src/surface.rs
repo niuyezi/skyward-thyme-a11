@@ -516,6 +516,15 @@ pub mod kms {
 
     impl KmsSurface {
         pub fn open(path: &str) -> Result<Self> {
+            Self::open_capped(path, None)
+        }
+
+        /// [`KmsSurface::open`] with a cap on the refresh the panel is
+        /// driven at: a panel that shows artefacts at its fastest mode runs
+        /// at the fastest mode no faster than the cap instead, which on a
+        /// panel with a mode of its own per rate is the one the phone's own
+        /// system drives it at.
+        pub fn open_capped(path: &str, refresh_hz: Option<u32>) -> Result<Self> {
             let card = open_card(path)?;
             let res = card.resource_handles().context("read KMS resources")?;
 
@@ -535,14 +544,16 @@ pub mod kms {
                 .ok_or_else(|| anyhow!("the panel reports no preferred mode"))?;
             // The fastest refresh at the preferred size, the first listed among
             // equals: Android scrolls at it, and the 13 Ultra's touch reports
-            // come at the same 120 Hz.
+            // come at the same 120 Hz. Where a cap is given, the fastest no
+            // faster than it: a panel driven past what it takes shows
+            // artefacts no setting of the recovery's own makes.
             let mode = *conn
                 .modes()
                 .iter()
-                .filter(|m| m.size() == preferred.size())
+                .filter(|m| m.size() == preferred.size() && refresh_hz.is_none_or(|hz| m.vrefresh() <= hz))
                 .rev()
                 .max_by_key(|m| m.vrefresh())
-                .expect("the preferred mode itself has the preferred size");
+                .unwrap_or(preferred);
             let (w, h) = (mode.size().0 as u32, mode.size().1 as u32);
 
             // The CRTC already driving the panel, or the first one an
