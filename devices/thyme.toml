@@ -22,14 +22,14 @@ corner_radius = 90
 sources = ["vendor"]
 load = []
 
-# The FocalTech FTS controller behind Xiaomi's touch layer, which is built
-# into the kernel: the touches come in on /dev/xiaomi-touch. The driver
-# resets the controller as it connects to it, and it comes back sending only
-# raw frames, which the system's touch algorithm turns into touches; a
-# recovery runs none of that. Told through Xiaomi's touch layer, the driver
-# has the controller report positions itself.
+# The FocalTech FTS controller, whose driver is built into this kernel and
+# reports multitouch positions on /dev/input/event5 by itself: the node
+# carries INPUT_PROP_DIRECT and ABS_MT_POSITION_X/Y, which is what the
+# recovery looks for. Nothing has to be written for it, and the
+# enable_touch_raw node this MIUI build's driver would take is absent, so a
+# write to it only makes the recovery give up at startup.
 [touch]
-writes = [{ path = "/sys/class/touch/touch_dev/enable_touch_raw", value = "0" }]
+writes = []
 
 # The firmware of the WLAN chip, and the apps the secure world runs, are on
 # the modem partition, which the phone mounts at /vendor/firmware_mnt and
@@ -85,11 +85,12 @@ server = "https://update.miui.com/updates/miotaV3.php"
 # `skyward-pack recovery --as-boot --partition boot` builds it, and the
 # configuration names no stock build for it to be taken out of a package.
 
-# qcom-hv-haptics, which says the motor's resonant frequency in
-# lra_frequency_hz. The click is made from samples at that frequency.
-[haptics]
-resonance = "/sys/class/qcom-haptics/lra_frequency_hz"
-strength = { lightest = 0.25, strongest = 0.75 }
+# The motor is an Awinic aw8697, which takes its commands as force-feedback
+# effects on /dev/input/event3 and keeps no sysfs file that says its resonant
+# frequency; the qcom-hv-haptics node the resonance would be read from is
+# absent. Without a frequency to make the click's samples at, the recovery
+# runs without vibration rather than fail on a file the driver never makes.
+# [haptics]
 
 # The partitions a backup of the baseband and EFS takes: the baseband's
 # settings, with the IMEI, and the sensors' calibration. And what of the
