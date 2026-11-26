@@ -543,6 +543,20 @@ fn bring_up(cfg: &DeviceConfig, slot: skyward_vab::Slot, found: Result<keys::Fou
         skyward_block::mount::mount(Path::new("binder"), binderfs, "binder", &[])?;
         skyward_sys::kmsg("binderfs is mounted on /dev/binderfs")?;
     }
+    // The nodes binderfs makes are the driver's, and every program that
+    // reaches a service opens one: the recovery's own init leaves them
+    // root's alone, so they are opened to every program as the phone's init
+    // opens the driver its kernel makes, and shown under the names the
+    // programs ask for.
+    for (made, asked) in [("binder", "/dev/binder"), ("hwbinder", "/dev/hwbinder"), ("vndbinder", "/dev/vndbinder")] {
+        let node = binderfs.join(made);
+        std::fs::set_permissions(&node, std::os::unix::fs::PermissionsExt::from_mode(0o666))
+            .with_context(|| format!("open {} to every program", node.display()))?;
+        let shown = Path::new(asked);
+        if !shown.exists() {
+            std::os::unix::fs::symlink(&node, shown).with_context(|| format!("point {asked} at {}", node.display()))?;
+        }
+    }
     let nodes = skyward_sys::ueventd::apply()?;
     skyward_sys::kmsg(&format!("{nodes} device nodes given the owner their phone describes"))?;
     let props = skyward_info::installed_props(slot)?;
