@@ -413,12 +413,15 @@ fn main() -> Result<()> {
             let binder = skyward_binder::driver::Binder::open()?;
             // A partition the phone's table has encrypted in no way opens
             // with no key service.
-            let service = match data::keyed()? {
-                true => {
-                    let hardware = skyward_binder::driver::Binder::hardware()?;
-                    Some(skyward_crypto::keymint::KeyMint::open(&binder, &hardware)?)
-                }
+            // The key service may answer on the hardware binder, so the binder
+            // it is reached through outlives the service.
+            let hardware = match data::keyed()? {
+                true => Some(skyward_binder::driver::Binder::hardware()?),
                 false => None,
+            };
+            let service = match &hardware {
+                Some(hardware) => Some(skyward_crypto::keymint::KeyMint::open(&binder, hardware)?),
+                None => None,
             };
             let opening = data::open_without_credential(service.as_ref())?;
             match &opening.mounted {
