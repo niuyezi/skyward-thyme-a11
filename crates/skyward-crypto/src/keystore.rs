@@ -69,8 +69,23 @@ impl StoredKey {
         if version.trim() != VERSION {
             bail!("{} is written in layout {}, Skyward reads layout {VERSION}", dir.display(), version.trim());
         }
-        if dir.join(FN_STRETCHING).exists() {
-            bail!("{} was written by an Android too old for Skyward to read", dir.display());
+        // Android 11 writes `stretching` beside the key, naming what the
+        // secret is stretched with before it joins the application id: "none"
+        // takes it as it is, "nopassword" empties it, and "scrypt N r p"
+        // stretches it.  A later Android dropped the file, which is why only
+        // those two kinds, whose stretch is a pass-through, are read here;
+        // the scrypt kind needs the secret a screen lock gives, which a
+        // recovery that reads the metadata key has not got.
+        if let Ok(kind) = fs::read_to_string(dir.join(FN_STRETCHING)) {
+            let kind = kind.trim();
+            match kind {
+                "none" | "nopassword" => {}
+                other if other.starts_with("scrypt ") => bail!(
+                    "{} stretches its secret with {other}, which Skyward does not do",
+                    dir.display()
+                ),
+                other => bail!("{} names an unknown stretch {other:?}", dir.display()),
+            }
         }
         let secdiscardable_hash = match dir.join(FN_SECDISCARDABLE).exists() {
             true => hash_with_prefix(SECDISCARDABLE_PREFIX, &read(FN_SECDISCARDABLE)?),
@@ -226,8 +241,18 @@ mod tests {
         let dir = tempdir("older-layout");
         fs::write(dir.join(FN_VERSION), "1").unwrap();
         fs::write(dir.join(FN_ENCRYPTED_KEY), [0u8; 64]).unwrap();
+        // Android 11's own stretching kinds pass the secret through, so a
+        // metadata key written by it opens.
+        for kind in ["nopassword", "none"] {
+            fs::write(dir.join(FN_STRETCHING), kind).unwrap();
+            assert!(!refusal(&dir).contains("stretch"), "{}", refusal(&dir));
+        }
+        // A secret stretched with scrypt needs a screen lock, which the
+        // metadata key is not guarded by.
         fs::write(dir.join(FN_STRETCHING), "scrypt 15 8 1").unwrap();
-        assert!(refusal(&dir).contains("too old"), "{}", refusal(&dir));
+        assert!(refusal(&dir).contains("scrypt 15 8 1"), "{}", refusal(&dir));
+        fs::write(dir.join(FN_STRETCHING), "nonsense").unwrap();
+        assert!(refusal(&dir).contains("unknown stretch"), "{}", refusal(&dir));
         fs::remove_file(dir.join(FN_STRETCHING)).unwrap();
         fs::write(dir.join(FN_VERSION), "2").unwrap();
         assert!(refusal(&dir).contains("layout 2"), "{}", refusal(&dir));
