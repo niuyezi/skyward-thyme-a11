@@ -1,298 +1,86 @@
-![Skyward Recovery](assets/hero.jpg)
+# Skyward Recovery — Xiaomi 10S (thyme) Android 11 移植
 
-# Skyward
+[English notes at the bottom](#english-notes)
 
-English | [简体中文](README.zh-CN.md)
+本仓库是 [kirklin/skyward](https://github.com/kirklin/skyward) 向 **小米 10S（thyme，M2102J2SC）** 的移植分支，目标系统为基于 Android 11（MIUI 12.5.3 / ANXIN ROM，SDK 30）的官方包。
 
-Skyward is a recovery written in Rust, from scratch.
+上游 Skyward 面向 Android 13+ 的 A/B 动态分区设备（recovery 独立分区、AIDL KeyMint、GKI boot）。thyme 是 Android 11 的 **recovery-in-boot** 设备：没有独立 recovery 分区，recovery 与系统共用 boot 分区，HAL 全部是 HIDL（keymaster@4.0、boot@1.0/1.1、gatekeeper@1.0）。本分支把这些差异逐项补齐。
 
-<p align="center">
-  <img src="assets/home.png" width="30%" alt="Home">
-  <img src="assets/settings-dark.png" width="30%" alt="Settings in dark mode">
-  <img src="assets/time-zone.png" width="30%" alt="Time zone">
-</p>
+## 当前状态
 
-## Features
-
-### Dual boot
-
-![One phone holds two systems](slides/en/out/01-dual-boot.png)
-
-![A switch rewrites only two partitions](slides/en/out/02-dual-boot-partitions.png)
-
-How a second system is packaged and started is in
-[How dual boot works](#how-dual-boot-works).
-
-### Decryption
-
-![Decrypt data with the screen lock](slides/en/out/03-decrypt.png)
-
-### Installing
-
-![Four kinds of packages from three places](slides/en/out/04-install.png)
-
-Install scripts get `7za` and `zstd`, which ROMs with a super image compressed by
-zstd use to flash it, and an `unzip` whose `-p` streams the image as it reads it.
-They also get `avbctl` and `resetprop`, to turn off verified boot's checks and to
-read and set properties.
-
-A partition image is told by what it holds. Images of boot, init_boot,
-vendor_boot, recovery, dtbo, vbmeta and of a whole super each go to their own
-partition. One that holds an erofs, ext4 or f2fs filesystem goes to any logical
-partition the running slot has in super, which is first made as large as the
-image, as fastbootd makes it. An image that tells nothing of itself goes to the
-partition its file is named after, as `modem.img` goes to modem, where the phone
-has that partition in both slots or as a logical one in super. An image in the
-sparse format is expanded as it is written. While a system update waits to be
-merged, super and the logical partitions in it are not flashed.
-
-### Online updates
-
-![Update the system and Skyward online](slides/en/out/05-updates.png)
-
-### Backup and restore
-
-![Back up the system, apps, photos and IMEI](slides/en/out/06-backup.png)
-
-### File manager
-
-![Manage the phone's files in Skyward](slides/en/out/07-files.png)
-
-### Terminal
-
-![Run a root shell right on the phone](slides/en/out/08-terminal.png)
-
-### Connecting a computer
-
-![Move files and flash partitions over USB](slides/en/out/09-computer.png)
-
-### Wiping data
-
-![Every choice says what it wipes](slides/en/out/10-wipe.png)
-
-### Replacing the stock recovery
-
-![Skyward does what the system asks](slides/en/out/11-requests.png)
-
-### Search
-
-![Type a few letters to find a feature](slides/en/out/12-search.png)
-
-### Advanced
-
-![When something breaks, fix it here first](slides/en/out/13-tools.png)
-
-### About phone
-
-![Check battery health and charge cycles](slides/en/out/14-specs.png)
-
-### Other features
-
-- Reboot to system, recovery, fastboot, bootloader or EDL, and switch slots
-- Light and dark themes
-- 15 languages: 简体中文, 繁體中文, English, Türkçe, Русский, Українська, Español,
-  Português (Brasil), Bahasa Indonesia, Tiếng Việt, Deutsch, Français, Italiano,
-  Polski and 日本語. Skyward starts in the system's language where it speaks it,
-  and in English otherwise
-
-### Without a system
-
-![Skyward starts even without a system](slides/en/out/15-no-system.png)
-
-## Supported devices
-
-| Device | Codename | Tested system version |
-| --- | --- | --- |
-| Xiaomi 17 Ultra | `nezha` | OS4.0.4.0.XPACNXM (Android 17) |
-| Xiaomi 13 Ultra | `ishtar` | OS3.0.308.0.WMACNXM (Android 16) |
-| REDMI K60 Pro | `socrates` | OS4.0.0.24.XMKCNXM (Android 17) |
-
-### 🚧 Under construction
-
-These images are built from each phone's stock firmware and have not been tried
-on the phone. They set up the screen, touch, Wi-Fi and vibration. The programs that
-decrypting the data partition takes are read on the phone from the installed
-system's own init scripts and service descriptions; what is read has been checked
-against each model's stock firmware, and how those programs run on these models has
-not been verified.
-
-| Device | Codename | Built on |
-| --- | --- | --- |
-| 🚧 Xiaomi 13 | `fuxi` | OS3.0.309.0.WMCCNXM (Android 16) |
-| 🚧 Xiaomi 13 Pro | `nuwa` | OS3.0.312.0.WMBCNXM (Android 16) |
-| 🚧 Xiaomi 14 | `houji` | OS3.0.307.0.WNCCNXM (Android 16) |
-| 🚧 Xiaomi 14 Pro | `shennong` | OS3.0.309.0.WNBCNXM (Android 16) |
-| 🚧 Xiaomi 14 Ultra | `aurora` | OS3.0.308.0.WNACNXM (Android 16) |
-| 🚧 Xiaomi 15 | `dada` | OS3.0.307.0.WOCCNXM (Android 16) |
-| 🚧 Xiaomi 15 Pro | `haotian` | OS3.0.309.0.WOBCNXM (Android 16) |
-| 🚧 Xiaomi 15 Ultra | `xuanyuan` | OS3.0.314.0.WOACNXM (Android 16) |
-| 🚧 Xiaomi 17 | `pudding` | OS4.0.4.0.XPCCNXM (Android 17) |
-| 🚧 Xiaomi 17 Pro | `pandora` | OS4.0.4.0.XBLCNXM (Android 17) |
-| 🚧 Xiaomi 17 Pro Max | `popsicle` | OS4.0.4.0.XPBCNXM (Android 17) |
-| 🚧 Xiaomi 17 Max | `byron` | OS3.0.310.0.WAFCNXM (Android 16) |
-| 🚧 REDMI K80 | `zorn` | OS3.0.309.0.WOKCNXM (Android 16) |
-| 🚧 REDMI K80 Pro | `miro` | OS3.0.305.0.WOMCNXM (Android 16) |
-| 🚧 REDMI K90 | `annibale` | OS3.0.307.0.WPKCNXM (Android 16) |
-| 🚧 REDMI K90 Pro Max | `myron` | OS4.0.4.0.XPMCNXM (Android 17) |
-| 🚧 REDMI K90 Ultra | `warsaw` | OS3.0.309.0.WHPCNXM (Android 16) |
-| 🚧 REDMI K100 Pro | `athens` | OS4.0.4.0.XPICNXM (Android 17) |
-| 🚧 REDMI K100 Pro Max | `songyuan` | OS4.0.4.0.XGNCNXM (Android 17) |
-
-## Installing Skyward
-
-Skyward needs an unlocked bootloader. Download the zip for your phone from
-[Releases](https://github.com/kirklin/skyward/releases), where each shows as the
-phone's model and codename, such as Xiaomi 17 Ultra (nezha). Check it against
-`SHA256SUMS`, unzip it, and flash the image inside to the recovery partition of
-the slot the phone runs from, with the phone in fastboot mode:
-
-```sh
-unzip skyward-v0.5.1-nezha-OS4.0.4.0.XPACNXM.zip
-fastboot flash recovery skyward-v0.5.1-nezha-OS4.0.4.0.XPACNXM.img
-fastboot reboot recovery
-```
-
-Afterwards Skyward updates itself over Wi-Fi from its newest release, on the
-Skyward update page in Settings; a newer image, unzipped, also installs from its own
-Install page. With **Flash Skyward again** on, a system update or zip that writes
-over the recovery partitions gets Skyward back in them.
-
-adb in Skyward is a root shell that needs no authorization on the phone: anyone
-with the phone and a cable can reach its storage while it is in recovery.
-
-## How dual boot works
-
-Skyward installs a second system beside the one in the phone's own partitions,
-whether that is HyperOS or a custom ROM, and switches between them from **Dual boot**
-on its home page. The second system's root is a file in the data partition that the
-filesystem may neither move nor delete, read and written through the partition
-itself; the boot images of both systems are kept in another such file. A switch
-writes only the boot and init_boot partitions of the slot that starts next, and
-keeps each step on /metadata first, so a switch cut off by a loss of power is
-finished when Skyward next starts. vendor_boot, dtbo, recovery, vbmeta, the firmware
-and super stay as they are, and the second system starts with the installed
-system's vendor_boot and dtbo.
-
-Before anything else writes the boot partitions, Skyward puts the installed system's
-boot images back: an install, a slot switch, fastboot, a factory reset, and a backup
-or restore of the boot partitions. The second system waits while a system update is
-still to be merged, and backups of the data partition leave it out.
-
-A second system installs from a zip on the Install page, as any other package does:
-
-| File | What it holds |
+| 功能 | 状态 |
 | --- | --- |
-| `system.toml` | `id`, `name`, `version` and `filesystem`; `init`, the program the root starts with, `/sbin/init` unless given; `minimum`, the least room the root takes, in bytes |
-| `boot.img` | The kernel the bootloader starts |
-| `rootfs.img` | The root filesystem's image, of the `filesystem` named |
-| `init_boot.img` | Only for a system with a first ramdisk of its own |
+| 临时启动（`fastboot boot`，免改 misc） | ✅ 可用，基于 TWRP ramdisk 底座 |
+| 触摸 / 显示 / 60Hz 刷新 | ✅ 正常（雪花条纹已修复） |
+| 时钟避开左上角挖孔 | ✅ `clock_x_dp = 55` |
+| 槽位（slot）读取 | ✅ HIDL boot@1.0/1.1 回退 + `ro.boot.slot_suffix` |
+| Data 解密 | 🚧 HIDL keymaster@4.0 客户端已实现，待真机验证 |
+| Wi-Fi | 🚧 未完成（wlan0 节点 / 驱动加载） |
+| 90Hz 刷新率 | ⏸ 按需求暂缓，当前锁定 60Hz |
 
-A system without an init_boot image of its own starts from one Skyward makes. Its
-program loads the installed system's first-stage kernel modules the way that
-system's first stage loads them, with their soft dependencies and the settings the
-kernel command line gives them, finds the root in the data partition, mounts it and
-starts `init` there. If anything stops it, it brings Skyward up, as a failed start
-of the installed system ends in the recovery: it leaves the reason in misc, unpacks
-the ramdisk of the slot's recovery partition over its own, as the kernel unpacks it
-when the bootloader starts the recovery, and hands over to Skyward's first program,
-so Skyward comes up however the bootloader treats a restart. Skyward shows why, and
-the second system still starts next until the user switches on Dual boot. A start
-that stops moving restarts into the recovery instead, and a phone restarted before
-the hand-over finds the same request in misc at its next start, which brings
-Skyward up before anything else. Where Skyward comes up neither way, the phone stays
-where it stopped, and never starts the same again and again. A system with a first
-ramdisk of its own finds Skyward's program at `/skyward/map`, which lays the root
-out as a block device and prints its node. Each switch to the second system writes
-its init_boot image with the program of the Skyward that switches, so an updated
-Skyward starts it with the new program.
+## 与上游的主要差异
 
-A running system switches by writing `boot-recovery` with
-`--switch_system=installed`, or `--switch_system=` and the second system's `id`, to
-misc, and restarting into recovery. Where the bootloader starts the slot again, as
-the 13 Ultra's can with a USB cable in, Skyward's program finds the request in misc
-at the next start and brings Skyward up before anything else.
+- **binder 头**：`parcel.rs` 的 AIDL 头从 `RECO` 改为 AOSP 标准的 `SYST`，修复 Android 11 上所有 binder 调用返回 `BAD_TYPE (-2147483647)` 的问题。
+- **Data 解密**：新增 `skyward-crypto/src/keymaster.rs`，实现 HIDL `android.hardware.keymaster@4.0::IKeymasterDevice` 客户端（plain union KeyParameter 布局），`keymint.rs` 中以 `KeyMint` 枚举统一 AIDL KeyMint（新设备）与 HIDL keymaster（本机）两条路径。
+- **槽位读取**：`skyward-vab/src/boot.rs` 支持 HIDL boot@1.0/1.1/1.2，低版本回退读 `ro.boot.slot_suffix`。
+- **服务发现**：`skyward-programs/src/secure.rs` 的密钥服务查找同时尝试 AIDL `android.hardware.security.keymint` 与 HIDL `android.hardware.keymaster`，并为 HIDL 场景拉起 hwservicemanager。
+- **设备配置**：`devices/thyme.toml` — 60Hz 刷新、时钟右移 55dp 避开挖孔、面板/触摸/背光节点按本机修正。
 
-## Building
+## 临时启动（推荐用法）
 
-Skyward builds with the version of Rust that `rust-toolchain.toml` names, with its
-`aarch64-linux-android` target, the Android NDK r29 and
-[cargo-ndk](https://github.com/bbqsrc/cargo-ndk). The recovery service is built for
-the phone, and the packer for the computer:
+本机没有独立 recovery 分区，直接 `fastboot boot` 官方风格的镜像会被小米 init 的版本校验逻辑带回系统。因此本分支提供 **TWRP 底座 + Skyward** 的临时启动镜像：
 
 ```sh
-cargo ndk -t arm64-v8a --platform 30 build --release -p skyward
-cargo build --release -p skyward-pack
+# 手机进入 fastboot 后
+fastboot boot skyward-thyme-tempboot.img
 ```
 
-The second system's first program runs before any library is there to load, so it
-is built as a static program:
+- 不写任何分区（misc、boot 均不动），重启即恢复原样。
+- 底座使用 [BOOT]Mi10S_TWRP3.7.1_A15_thyme 的 init / sepolicy / 用户空间，`system/bin/recovery` 替换为 Skyward 二进制。
+- 需要固化时，在临时启动的 Skyward 里操作，或参考 TWRP 的固化流程。
+
+## 构建
+
+本机无 Rust 工具链，使用 GitHub Actions 云端构建（`.github/workflows/`，push 到 master/thyme 自动触发），产物在 Actions Artifacts 下载。
+
+本地重建临时启动镜像（Python，无需 Rust）：
 
 ```sh
-RUSTFLAGS="-C target-feature=+crt-static" cargo ndk -t arm64-v8a --platform 30 build --release -p skyward-system-init --target-dir target/system-init
+# 前置：TWRP [BOOT] 镜像 + CI 构建出的 skyward 二进制镜像
+python imgcmp/graft.py   # 以 TWRP ramdisk 为底座替换 recovery 并重打包
 ```
 
-The packer takes the stock recovery partition out of the build's full update
-package on Xiaomi's server, reading only the part of the package the partition is
-in, and checks its SHA-256 against the device file:
+上游完整构建方式见 [kirklin/skyward](https://github.com/kirklin/skyward) 的 README。
 
-```sh
-target/release/skyward-pack stock --config devices/nezha.toml --out target/stock/nezha/recovery.img
-```
+## 致谢
 
-Then it builds the image on top of it:
-
-```sh
-target/release/skyward-pack recovery \
-  --stock target/stock/nezha/recovery.img \
-  --binary target/aarch64-linux-android/release/skyward \
-  --system-init target/system-init/aarch64-linux-android/release/system-init \
-  --config devices/nezha.toml \
-  --font resources/fonts/MiSansVF.ttf \
-  --mono resources/fonts/KirkMono-Regular.ttf \
-  --mono-license resources/fonts/KirkMono-OFL.txt \
-  --out target/skyward-nezha.img
-```
-
-Tests and lints run on the computer; what runs only on the phone is linted for it:
-
-```sh
-cargo test --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo ndk -t arm64-v8a --platform 30 clippy --workspace --all-targets -- -D warnings
-```
-
-The tests whose names start with `on_the_phone` make filesystems, mount them and
-set encryption keys, which only a phone does. With a phone in Skyward attached over
-adb, its data partition open, `cargo ndk` pushes each test program to the phone and
-runs it there, one test at a time:
-
-```sh
-cargo ndk -t arm64-v8a --platform 30 test -p skyward -p skyward-block -p skyward-files -p skyward-install -p skyward-mtp -p skyward-vab on_the_phone -- --test-threads=1
-```
-
-`skyward-preview` draws the pages on the computer, as PNG files, without a phone:
-each page whole, as a long screenshot shows it, in the states it can be in, and the
-screen at moments of touches and motion. `--lang` picks the language by a locale
-such as `en` or `zh-TW`:
-
-```sh
-cargo run --release -p skyward-preview -- target/preview --lang en
-```
-
-### Translations
-
-Each language's texts are one file in `crates/skyward-ui/locales`, named by its
-locale: `tr.toml`, `pt-BR.toml`. `en.toml` is the reference, with a comment on
-where each text shows. The build reads every file and stops on a text that is
-missing, or that names a value in braces the English text does not.
-
-To correct a translation, change its text in the language's file. To check how it
-looks, draw the pages in that language with `skyward-preview --lang`. With each
-page, it says which texts did not fit their place: `cut short in` for a text that
-ends in an ellipsis, `set at 80% in` for a label set smaller to fit its key, button
-or slider, `past the edge in` for a text that runs off the screen, and `overlap in`
-for two texts that run into each other.
+- [kirklin/skyward](https://github.com/kirklin/skyward) — 上游项目
+- TWRP for thyme — 临时启动底座与 Android 11 HIDL 适配参考
 
 ## License
 
 [GPL-3.0-or-later](LICENSE)
+
+---
+
+## English notes
+
+This fork ports [kirklin/skyward](https://github.com/kirklin/skyward) to the **Xiaomi 10S (thyme)** running Android 11 (MIUI 12.5.3 / ANXIN ROM, SDK 30).
+
+thyme is a recovery-in-boot device on Android 11 with HIDL-only HALs (keymaster@4.0, boot@1.0/1.1), unlike the AIDL / dedicated-recovery devices upstream targets. Key changes:
+
+- AIDL binder header fixed to AOSP `SYST` (upstream `RECO` caused `BAD_TYPE` on every call).
+- HIDL `keymaster@4.0` client added for data decryption, unified behind a `KeyMint` enum with the AIDL path.
+- HIDL boot control fallback (`ro.boot.slot_suffix`) for slot detection.
+- Key service discovery tries AIDL keymint first, then HIDL keymaster, and starts hwservicemanager when needed.
+- `devices/thyme.toml`: 60 Hz panel, clock shifted 55 dp past the camera hole.
+
+**Temporary boot** (recommended, no partition is written):
+
+```sh
+fastboot boot skyward-thyme-tempboot.img
+```
+
+The image grafts the Skyward binary onto a TWRP ramdisk base, which avoids Xiaomi's init version-check that otherwise bounces `fastboot boot` back into the system. Build it locally with `imgcmp/graft.py`, or let GitHub Actions build the binary.
+
+Status: temp boot, touch/display/60 Hz, and slot reading work; data decryption (HIDL keymaster) is implemented and pending on-device verification; Wi-Fi is not yet working; 90 Hz is deferred by request.
