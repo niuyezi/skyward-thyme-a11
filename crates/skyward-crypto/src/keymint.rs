@@ -29,7 +29,7 @@ const FINISH: u32 = 3;
 const ABORT: u32 = 4;
 
 /// How long the nonce of an AES-GCM key is here.
-const NONCE_BYTES: usize = 12;
+pub(crate) const NONCE_BYTES: usize = 12;
 
 /// The key service's way of saying the key was made under an older build of
 /// the phone's own firmware and has to be renewed before it will be used.
@@ -120,17 +120,17 @@ pub struct Hardware {
     pub author: String,
 }
 
-/// The phone's key service, as this program talks to it.
-pub struct KeyMint<'a> {
+/// The phone's key service of the newer kind, as this program talks to it.
+pub struct KeyMintDevice<'a> {
     device: Handle<'a>,
 }
 
-impl<'a> KeyMint<'a> {
+impl<'a> KeyMintDevice<'a> {
     /// Reach the running key service, or say that none is.
-    pub fn open(binder: &'a Binder) -> Result<KeyMint<'a>> {
+    pub fn open(binder: &'a Binder) -> Result<KeyMintDevice<'a>> {
         let device = service::find(binder, SERVICE)?
             .with_context(|| format!("{SERVICE} is not running; the phone's key service has to be started first"))?;
-        Ok(KeyMint { device })
+        Ok(KeyMintDevice { device })
     }
 
     pub fn hardware(&self) -> Result<Hardware> {
@@ -335,5 +335,65 @@ impl<'a> KeyMint<'a> {
     pub fn usable(&self, key_blob: &[u8], app_id: &[u8]) -> Result<()> {
         let operation = self.begin(key_blob, app_id, &[0; NONCE_BYTES], None)?;
         self.abort(&operation)
+    }
+}
+
+/// The phone's key service, whichever kind it has: KeyMint, which Android
+/// 12 and later carry, reached through the service directory, or Keymaster,
+/// which Android 11 and earlier carry, reached as a hardware service. Both
+/// do the same work for this program, so the two are told apart here and
+/// nowhere else.
+pub enum KeyMint<'a> {
+    Newer(KeyMintDevice<'a>),
+    Older(crate::keymaster::Keymaster<'a>),
+}
+
+impl<'a> KeyMint<'a> {
+    /// Reach the running key service: the newer kind through `binder` where
+    /// the phone has one, the older kind through `hardware` otherwise. Say
+    /// so where neither is running.
+    pub fn open(binder: &'a Binder, hardware: &'a Binder) -> Result<KeyMint<'a>> {
+        // The newer kind registers with the service directory, so a phone
+        // that has it answers for its name there. The older kind is a
+        // hardware service and does not.
+        if service::declared(binder, SERVICE)? || service::find(binder, SERVICE)?.is_some() {
+            return Ok(KeyMint::Newer(KeyMintDevice::open(binder)?));
+        }
+        Ok(KeyMint::Older(crate::keymaster::Keymaster::open(hardware)?))
+    }
+
+    pub fn hardware(&self) -> Result<Hardware> {
+        match self {
+            KeyMint::Newer(k) => k.hardware(),
+            KeyMint::Older(k) => k.hardware(),
+        }
+    }
+
+    pub fn ephemeral_storage_key(&self, key: &[u8]) -> Result<Vec<u8>> {
+        match self {
+            KeyMint::Newer(k) => k.ephemeral_storage_key(key),
+            KeyMint::Older(k) => k.ephemeral_storage_key(key),
+        }
+    }
+
+    pub fn authorizations(&self, key_blob: &[u8], app_id: &[u8]) -> Result<Vec<(i32, i64)>> {
+        match self {
+            KeyMint::Newer(k) => k.authorizations(key_blob, app_id),
+            KeyMint::Older(k) => k.authorizations(key_blob, app_id),
+        }
+    }
+
+    pub fn gcm_decrypt(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], body: &[u8], note: Option<&Token>) -> Result<Vec<u8>> {
+        match self {
+            KeyMint::Newer(k) => k.gcm_decrypt(key_blob, app_id, nonce, body, note),
+            KeyMint::Older(k) => k.gcm_decrypt(key_blob, app_id, nonce, body, note),
+        }
+    }
+
+    pub fn usable(&self, key_blob: &[u8], app_id: &[u8]) -> Result<()> {
+        match self {
+            KeyMint::Newer(k) => k.usable(key_blob, app_id),
+            KeyMint::Older(k) => k.usable(key_blob, app_id),
+        }
     }
 }

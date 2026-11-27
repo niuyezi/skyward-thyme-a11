@@ -60,6 +60,10 @@ impl Message {
         self.data.extend_from_slice(&v.to_le_bytes());
     }
 
+    pub fn i32(&mut self, v: i32) {
+        self.data.extend_from_slice(&v.to_le_bytes());
+    }
+
     pub fn u64(&mut self, v: u64) {
         self.data.extend_from_slice(&v.to_le_bytes());
     }
@@ -183,8 +187,25 @@ impl<'a> Answer<'a> {
         Ok(unsafe { std::slice::from_raw_parts(at as *const u8, length as usize) })
     }
 
+    /// One key parameter as HIDL writes it: the tag, then the union of the
+    /// older kind, which names no arm of its own — the tag alone says
+    /// which value follows — then a blob carried beside the union. The
+    /// answer is the tag and the number the value says, or, for a blob,
+    /// how long it is, which is all this program reads of a key's
+    /// authorizations.
+    pub fn parameter(&mut self) -> Result<(i32, i64)> {
+        let tag = self.i32()?;
+        // The union is 8 bytes wide, as wide as its widest arm; the value
+        // is read from the low bytes.
+        let raw = self.take(8)?;
+        let number = i32::from_le_bytes(raw[0..4].try_into().expect("four bytes")) as i64;
+        let blob = self.pointed()?;
+        let value = if blob.is_empty() { number } else { blob.len() as i64 };
+        Ok((tag, value))
+    }
+
     /// Text the far side wrote as its own value rather than as a frame.
-    fn text(&mut self) -> Result<String> {
+    pub fn text(&mut self) -> Result<String> {
         let units = self.i32()?;
         if units < 0 {
             bail!("text of length {units} was read where some was expected");

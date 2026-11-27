@@ -10,9 +10,13 @@ use anyhow::{bail, ensure, Context, Result};
 use skyward_config::Service;
 use std::path::Path;
 
-/// The key service, and the packages whose services it serves besides: it
-/// is one program behind them all.
-const KEYS: &str = "android.hardware.security.keymint.IKeyMintDevice/default";
+/// The key service, by its package and its interface, which Android 12 and
+/// later name KeyMint and Android 11 and earlier name Keymaster.
+const KEYMASTER: (&str, &str) = ("android.hardware.security.keymint", "IKeyMintDevice");
+const KEY_MASTER_OLD: (&str, &str) = ("android.hardware.keymaster", "IKeymasterDevice");
+
+/// The packages whose services the KeyMint program serves besides: it is one
+/// program behind them all.
 const KEY_PACKAGES: [&str; 3] = ["android.hardware.security.keymint", "android.hardware.security.secureclock", "android.hardware.security.sharedsecret"];
 
 /// The credential service and the boot control, each by its package and
@@ -179,14 +183,33 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
         }
     }
 
-    ensure!(described(phone, Kind::Aidl, KEYS).is_some(), "the phone describes no {KEYS}");
-    let keys = behind(phone, "the key service", KEYS, |file| file.contains("keymint") && !file.contains("strongbox"))?;
+    // The key service comes as the newer kind, KeyMint, on Android 12 and
+    // later, and as the older kind, Keymaster, on Android 11 and earlier.
+    // Take whichever the phone describes.
+    let (keys_name, keys_kind) = offered(phone, KEYMASTER)
+        .or_else(|| offered(phone, KEY_MASTER_OLD))
+        .context("the phone describes no key service")?;
+    let keys = match keys_kind {
+        Kind::Aidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymint") && !file.contains("strongbox"))?,
+        Kind::Hidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymaster") && !file.contains("strongbox"))?,
+    };
+    let ready_with = match keys_kind {
+        Kind::Aidl => Ready::Service(keys_name.clone()),
+        Kind::Hidl => Ready::HardwareService(keys_name.clone()),
+    };
     let with_keys = |d: &Described| d.instance == INSTANCE && KEY_PACKAGES.contains(&d.package.as_str());
-    start(&mut out, started(phone, keys, Ready::Service(KEYS.into()), besides(phone, keys, KEYS, with_keys)));
+    let registers = match keys_kind {
+        Kind::Aidl => besides(phone, keys, &keys_name, with_keys),
+        // The older kind registers with the hardware directory, which takes
+        // what the phone describes of it; nothing else of the program's is
+        // told of it here.
+        Kind::Hidl => Vec::new(),
+    };
+    start(&mut out, started(phone, keys, ready_with, registers));
 
     let (credentials, credentials_kind) = offered(phone, CREDENTIALS).context("the phone describes no credential service")?;
     let (boot, boot_kind) = offered(phone, BOOT).context("the phone describes no boot control")?;
-    if credentials_kind == Kind::Hidl || boot_kind == Kind::Hidl {
+    if keys_kind == Kind::Hidl || credentials_kind == Kind::Hidl || boot_kind == Kind::Hidl {
         let directory = phone
             .programs
             .iter()

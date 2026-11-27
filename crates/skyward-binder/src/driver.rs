@@ -366,6 +366,12 @@ impl<'a> Handle<'a> {
     pub fn transact(&self, code: u32, data: &impl Payload) -> Result<Reply<'a>> {
         self.binder.transact(self.handle, code, data)
     }
+
+    /// The number this end holds the object by, which an older service's
+    /// methods take as a plain value rather than as an object of its own.
+    pub fn number(&self) -> u64 {
+        self.handle as u64
+    }
 }
 
 impl Drop for Handle<'_> {
