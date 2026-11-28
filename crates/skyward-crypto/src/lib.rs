@@ -2,6 +2,7 @@ pub mod encryption;
 pub mod fscrypt;
 pub mod gatekeeper;
 pub mod keystore;
+pub mod keystore1;
 pub mod locksettings;
 pub mod sqlite;
 pub mod sharedsecret;

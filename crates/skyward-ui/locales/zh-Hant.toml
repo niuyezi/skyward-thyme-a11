@@ -674,6 +674,7 @@ enter_lock = "輸入螢幕鎖定密碼"
 enter_lock_of = "輸入使用者 {user} 的螢幕鎖定密碼"
 checking = "正在驗證"
 to_see_files = "解密後可查看本機檔案"
+wrong_credential = "鎖屏密碼不正確"
 
 [install]
 current_system = "目前系統"

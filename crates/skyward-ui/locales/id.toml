@@ -674,6 +674,7 @@ enter_lock = "Masukkan kunci layar"
 enter_lock_of = "Masukkan kunci layar pengguna {user}"
 checking = "Memeriksa"
 to_see_files = "Dekripsi untuk melihat file ponsel"
+wrong_credential = "Itu bukan kata sandi kunci layar"
 
 [install]
 current_system = "Sistem saat ini"

@@ -689,6 +689,7 @@ enter_lock = "Введите PIN-код или пароль"
 enter_lock_of = "PIN-код или пароль пользователя {user}"
 checking = "Проверка"
 to_see_files = "Расшифруйте, чтобы увидеть файлы"
+wrong_credential = "Это не пароль блокировки"
 
 [install]
 current_system = "Текущая система"

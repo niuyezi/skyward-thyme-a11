@@ -1106,6 +1106,25 @@ pub fn merge_failed(l: Lang, why: &str) -> String {
     texts::update::merge_failed(l, why)
 }
 
+/// What the user entered did not open their own files, as the page says
+/// it: the words the phone's own parts answer with are for the log, and
+/// the page speaks the language chosen.
+pub fn unlock_failed(l: Lang, why: &str) -> String {
+    // The words the secure world and its parts answer a wrong credential
+    // with, wherever they come from, all mean the one thing the page says.
+    const WRONG: [&str; 5] = [
+        "the secure world does not recognise that credential",
+        "the secure element does not recognise that credential",
+        "the secure element does not recognise that credential, and holds off further tries",
+        "the phone is holding off further tries",
+        "the secure element is holding off further tries",
+    ];
+    match WRONG.iter().any(|w| why.contains(w)) {
+        true => l.pick(texts::decrypt::WRONG_CREDENTIAL).to_string(),
+        false => why.to_string(),
+    }
+}
+
 /// What work that takes a program of the installed system's `base`
 /// partition asks while that partition is not mounted.
 pub fn mount_first(l: Lang, base: &str) -> String {

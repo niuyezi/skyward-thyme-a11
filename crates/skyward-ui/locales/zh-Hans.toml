@@ -674,6 +674,7 @@ enter_lock = "输入锁屏密码"
 enter_lock_of = "输入用户 {user} 的锁屏密码"
 checking = "正在验证"
 to_see_files = "解密后可查看本机文件"
+wrong_credential = "锁屏密码不正确"
 
 [install]
 current_system = "当前系统"

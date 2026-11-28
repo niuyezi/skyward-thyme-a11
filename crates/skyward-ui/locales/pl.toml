@@ -689,6 +689,7 @@ enter_lock = "Podaj blokadę ekranu"
 enter_lock_of = "Podaj blokadę użytkownika {user}"
 checking = "Sprawdzanie"
 to_see_files = "Odszyfruj, aby zobaczyć pliki telefonu"
+wrong_credential = "To nie jest hasło blokady ekranu"
 
 [install]
 current_system = "Bieżący system"

@@ -679,6 +679,7 @@ enter_lock = "Ekran kilidini girin"
 enter_lock_of = "Kullanıcı {user} için ekran kilidini girin"
 checking = "Doğrulanıyor"
 to_see_files = "Telefonun dosyalarını görmek için şifreyi çözün"
+wrong_credential = "Bu, ekran kilidi parolası değil"
 
 [install]
 current_system = "Geçerli sistem"

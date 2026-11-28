@@ -684,6 +684,7 @@ enter_lock = "Inserisci il blocco schermo"
 enter_lock_of = "Inserisci il blocco schermo dell'utente {user}"
 checking = "Verifica in corso"
 to_see_files = "Decripta per vedere i file del telefono"
+wrong_credential = "Quella non è la password di blocco"
 
 [install]
 current_system = "Sistema attuale"

@@ -679,6 +679,7 @@ enter_lock = "Nhập mã khóa màn hình"
 enter_lock_of = "Nhập mã khóa màn hình của người dùng {user}"
 checking = "Đang kiểm tra"
 to_see_files = "Giải mã để xem tệp của điện thoại"
+wrong_credential = "Đó không phải là mật khẩu khóa màn hình"
 
 [install]
 current_system = "Hệ thống hiện tại"

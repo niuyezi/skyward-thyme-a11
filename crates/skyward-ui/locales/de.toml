@@ -679,6 +679,7 @@ enter_lock = "Displaysperre eingeben"
 enter_lock_of = "Displaysperre von Nutzer {user} eingeben"
 checking = "Wird geprüft"
 to_see_files = "Entschlüsseln, um die Dateien zu sehen"
+wrong_credential = "Das ist nicht der Sperrbildschirm-Code"
 
 [install]
 current_system = "Aktuelles System"

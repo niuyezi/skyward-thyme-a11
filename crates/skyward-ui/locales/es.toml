@@ -684,6 +684,7 @@ enter_lock = "Escribe el bloqueo de pantalla"
 enter_lock_of = "Escribe el bloqueo de pantalla del usuario {user}"
 checking = "Comprobando"
 to_see_files = "Descifra para ver los archivos del teléfono"
+wrong_credential = "Esa no es la contraseña de bloqueo"
 
 [install]
 current_system = "Sistema actual"

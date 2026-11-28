@@ -2391,7 +2391,8 @@ impl Pages<'_> {
             }
             decrypt::Ended::Unlocked(Err(why)) => {
                 skyward_sys::kmsg(&format!("what was entered did not open the user's files: {why}"))?;
-                self.app.unlock_failed(why, now);
+                let said = skyward_ui::fmt::unlock_failed(self.app.state.lang, &why);
+                self.app.unlock_failed(said, now);
             }
         }
         // Screenshots taken while internal storage was closed go into

@@ -684,6 +684,7 @@ enter_lock = "Digite o bloqueio de tela"
 enter_lock_of = "Digite o bloqueio de tela do usuário {user}"
 checking = "Verificando"
 to_see_files = "Descriptografe para ver os arquivos"
+wrong_credential = "Essa não é a senha de bloqueio"
 
 [install]
 current_system = "Sistema atual"

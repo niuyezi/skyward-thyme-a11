@@ -768,6 +768,7 @@ enter_lock = "Enter the screen lock"
 enter_lock_of = "Enter user {user}'s screen lock"
 checking = "Checking"
 to_see_files = "Decrypt to see the phone's files"
+wrong_credential = "That isn't the screen lock"
 
 # The install page: the system on the phone now, and where a package can
 # come from.

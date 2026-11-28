@@ -674,6 +674,7 @@ enter_lock = "画面ロックを入力"
 enter_lock_of = "ユーザー {user} の画面ロックを入力"
 checking = "確認中"
 to_see_files = "復号するとデバイス内のファイルを表示できます"
+wrong_credential = "ロック画面のパスワードが違います"
 
 [install]
 current_system = "現在のシステム"

@@ -684,6 +684,7 @@ enter_lock = "Saisissez le code de verrouillage"
 enter_lock_of = "Saisissez le code de l’utilisateur {user}"
 checking = "Vérification"
 to_see_files = "Déchiffrez pour voir les fichiers du téléphone"
+wrong_credential = "Ce n'est pas le code de déverrouillage"
 
 [install]
 current_system = "Système actuel"
