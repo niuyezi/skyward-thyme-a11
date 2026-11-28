@@ -203,12 +203,18 @@ fn main() -> Result<()> {
             // own, and none of the stock one's is dropped: the phone's
             // kernel needs what Xiaomi put there to find its partitions.
             if let Some(line) = &cmdline {
-                let mut base = img.header.cmdline.trim_end_matches('\0').to_string();
-                if !base.is_empty() && !base.ends_with(' ') {
-                    base.push(' ');
+                let mut base = img.header.cmdline.to_vec();
+                let used = base.iter().position(|&b| b == 0).unwrap_or(base.len());
+                let mut text = String::from_utf8_lossy(&base[..used]).into_owned();
+                if !text.is_empty() && !text.ends_with(' ') {
+                    text.push(' ');
                 }
-                base.push_str(line);
-                img.header.cmdline = base;
+                text.push_str(line);
+                let bytes = text.as_bytes();
+                anyhow::ensure!(bytes.len() < base.len(), "the command line runs past the {} bytes the header holds", base.len());
+                base[..bytes.len()].copy_from_slice(bytes);
+                base[bytes.len()..].fill(0);
+                img.header.cmdline = base.into_boxed_slice().try_into().expect("the command line is the header's own length");
             }
             let bytes = img.to_bytes()?;
             write(&out, &img, &avb::footed(&bytes, &partition, size, &Sha256::digest(&bytes))?)
