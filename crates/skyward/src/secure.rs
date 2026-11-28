@@ -281,11 +281,16 @@ pub fn publish_descriptions(wanted: &[String]) -> Result<()> {
     // since.
     let binder = skyward_binder::driver::Binder::open()?;
     // The first it does not know described settles that it starts again.
+    // A directory that has no call to ask, as Android 11's does not, is
+    // not asked: it starts again only where the descriptions it reads
+    // were rewritten, and what it knows of them is trusted.
     let mut unknown = false;
-    for name in wanted {
-        if !skyward_binder::service::declared(&binder, name).with_context(|| format!("ask the service directory whether it knows {name} described"))? {
-            unknown = true;
-            break;
+    if skyward_binder::service::declares()? {
+        for name in wanted {
+            if !skyward_binder::service::declared(&binder, name).with_context(|| format!("ask the service directory whether it knows {name} described"))? {
+                unknown = true;
+                break;
+            }
         }
     }
     if unknown || rewritten > 0 {

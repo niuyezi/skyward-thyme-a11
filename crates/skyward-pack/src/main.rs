@@ -152,7 +152,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot, cmdline, as_recovery, out } => {
+        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot: _, cmdline, as_recovery, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             // The ramdisk is written back compressed the way the phone's own
@@ -204,19 +204,19 @@ fn main() -> Result<()> {
             // itself unless both of the last two are set; the recovery checks
             // packages against the installed system instead.
             //
-            // A boot partition's ramdisk starts the installed system too, so
-            // none of this is done to it: the build properties stay as the
-            // phone's build wrote them, or the system would come up
-            // debuggable and with adb needing no authorization.
-            if !as_boot || as_recovery {
-                let stock_props = &rd
-                    .find(paths::PROP_DEFAULT)
-                    .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
-                    .data;
-                let mut props = without(stock_props, &BUILD_VERSION);
-                props.extend_from_slice(b"\nro.secure=0\nro.adb.secure=0\nro.debuggable=1\nro.ota.allow_downgrade=true\n");
-                rd.replace(paths::PROP_DEFAULT, props)?;
-            }
+            // A boot partition's ramdisk starts the installed system too, but
+            // the system never reads this file: first-stage init switches
+            // root to first_stage_ramdisk before any property is loaded, and
+            // the properties the system runs with come from the system's own
+            // partitions. Only the recovery, which keeps this root, reads
+            // what is written here.
+            let stock_props = &rd
+                .find(paths::PROP_DEFAULT)
+                .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
+                .data;
+            let mut props = without(stock_props, &BUILD_VERSION);
+            props.extend_from_slice(b"\nro.secure=0\nro.adb.secure=0\nro.debuggable=1\nro.ota.allow_downgrade=true\n");
+            rd.replace(paths::PROP_DEFAULT, props)?;
             img.ramdisk = rd.encode_with(compression)?;
             // A command line written here is the bootloader's to add to its
             // own, and none of the stock one's is dropped: the phone's

@@ -1281,7 +1281,12 @@ impl<'a> Pages<'a> {
         let inputs = Inputs::open(w, h, cfg.touch.writes.clone())?;
         let started = Instant::now();
         let control = Control::open()?;
-        let haptics = cfg.haptics.as_ref().map(Haptics::open).transpose()?;
+        // The motor's node is not always where the configuration says: the
+        // input devices are numbered as they are found, and a driver that
+        // comes up late leaves the motor's node with another number. The
+        // recovery runs without vibration rather than fail on a node that
+        // is not there.
+        let haptics = cfg.haptics.as_ref().map(Haptics::open).transpose().inspect_err(|e| eprintln!("haptics: {e:#}")).ok().flatten();
         let backlight = Backlight::open()?;
         let first = match &request.work {
             Work::Fastboot => Screen::Fastboot,

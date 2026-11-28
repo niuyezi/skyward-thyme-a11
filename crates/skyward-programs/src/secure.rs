@@ -189,6 +189,20 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
     let (keys_name, keys_kind) = offered(phone, KEYMASTER)
         .or_else(|| offered(phone, KEY_MASTER_OLD))
         .context("the phone describes no key service")?;
+    let (credentials, credentials_kind) = offered(phone, CREDENTIALS).context("the phone describes no credential service")?;
+    let (boot, boot_kind) = offered(phone, BOOT).context("the phone describes no boot control")?;
+    // The directory for hardware services comes before any of them: a
+    // service of the older kind registers with it as it starts, and one
+    // started before the directory is up ends where it cannot register,
+    // again and again, which leaves nothing for the recovery to reach.
+    if keys_kind == Kind::Hidl || credentials_kind == Kind::Hidl || boot_kind == Kind::Hidl {
+        let directory = phone
+            .programs
+            .iter()
+            .find(|p| p.name == HARDWARE_DIRECTORY && phone.carries(p))
+            .context("the phone has hardware services of the older kind, and no directory for them among the programs its scripts name")?;
+        start(&mut out, started(phone, directory, Ready::Property(HARDWARE_DIRECTORY_READY), Vec::new()));
+    }
     let keys = match keys_kind {
         Kind::Aidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymint") && !file.contains("strongbox"))?,
         Kind::Hidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymaster") && !file.contains("strongbox"))?,
@@ -207,16 +221,6 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
     };
     start(&mut out, started(phone, keys, ready_with, registers));
 
-    let (credentials, credentials_kind) = offered(phone, CREDENTIALS).context("the phone describes no credential service")?;
-    let (boot, boot_kind) = offered(phone, BOOT).context("the phone describes no boot control")?;
-    if keys_kind == Kind::Hidl || credentials_kind == Kind::Hidl || boot_kind == Kind::Hidl {
-        let directory = phone
-            .programs
-            .iter()
-            .find(|p| p.name == HARDWARE_DIRECTORY && phone.carries(p))
-            .context("the phone has hardware services of the older kind, and no directory for them among the programs its scripts name")?;
-        start(&mut out, started(phone, directory, Ready::Property(HARDWARE_DIRECTORY_READY), Vec::new()));
-    }
     let ready = |name: String, kind: Kind| match kind {
         Kind::Aidl => Ready::Service(name),
         Kind::Hidl => Ready::HardwareService(name),

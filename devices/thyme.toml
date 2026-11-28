@@ -25,8 +25,8 @@ refresh_hz = 60
 clock_x_dp = 62.0
 # The hole's lower edge sits level with the clock's lowest pixels, which
 # leaves the clock looking low against the hole rather than centred on it;
-# the clock is lifted a little to sit beside the hole's middle.
-clock_y_dp = -6.0
+# the clock is lifted to sit beside the hole's middle.
+clock_y_dp = -14.0
 
 [modules]
 # A phone whose kernel is 4.19, before GKI: its modules are all on the
@@ -100,11 +100,13 @@ server = "https://update.miui.com/updates/miotaV3.php"
 # configuration names no stock build for it to be taken out of a package.
 
 # The motor is an Awinic aw8697, which takes its commands as force-feedback
-# effects on /dev/input/event3 and keeps no sysfs file that says its resonant
-# frequency; the qcom-hv-haptics node the resonance would be read from is
-# absent. Without a frequency to make the click's samples at, the recovery
-# runs without vibration rather than fail on a file the driver never makes.
-# [haptics]
+# effects on its input device and says its resonant frequency in f0_value,
+# in tenths of a hertz, beside the driver's other calibration files. The
+# click is made from samples at that frequency, and the strengths are the
+# 17 Ultra's, which were felt on that phone's motor.
+[haptics]
+resonance = "/sys/class/input/input3/device/f0_value"
+strength = { lightest = 0.25, strongest = 0.75 }
 
 # The partitions a backup of the baseband and EFS takes: the baseband's
 # settings, with the IMEI, and the sensors' calibration. And what of the

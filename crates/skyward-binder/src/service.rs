@@ -17,6 +17,9 @@ const DIRECTORY: &str = "android.os.IServiceManager";
 /// which numbering it keeps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Methods {
+    /// The Android version the recovery was built as, which says which
+    /// numbering the directory keeps and which calls it has at all.
+    sdk: u32,
     /// Ask for a service without waiting for one that has not registered
     /// yet.
     check_service: u32,
@@ -36,8 +39,8 @@ const LOOKUPS_DECLARED: u32 = 36;
 /// its methods.
 fn methods_of(sdk: u32) -> Methods {
     match sdk >= LOOKUPS_DECLARED {
-        true => Methods { check_service: 3, add_service: 5, list_services: 6, is_declared: 9 },
-        false => Methods { check_service: 2, add_service: 3, list_services: 4, is_declared: 7 },
+        true => Methods { sdk, check_service: 3, add_service: 5, list_services: 6, is_declared: 9 },
+        false => Methods { sdk, check_service: 2, add_service: 3, list_services: 4, is_declared: 7 },
     }
 }
 
@@ -142,19 +145,39 @@ pub fn interface(service: &crate::driver::Handle) -> Result<String> {
     reply.read().string().context("read which interface an object serves")
 }
 
+/// The first version of Android whose service directory answers whether a
+/// service is described: isDeclared was added to IServiceManager in
+/// Android 12, and a directory of an earlier version answers a call for it
+/// with a failed transaction rather than a no.
+const IS_DECLARED_ANSWERED: u32 = 31;
+
 /// Whether the phone's own description says it has this service. The
 /// directory turns away a hardware service the description does not name,
 /// so a service that will not register is often one the directory cannot
-/// see described.
+/// see described. A directory that has no such call of its own, as
+/// Android 11's does not, is not asked: what it would say is read from
+/// what the phone describes instead, by whoever asks here.
 #[cfg(target_os = "android")]
 pub fn declared(binder: &crate::driver::Binder, name: &str) -> Result<bool> {
+    let methods = methods()?;
+    if methods.sdk < IS_DECLARED_ANSWERED {
+        return Ok(false);
+    }
     let directory = binder.directory()?;
     let mut call = Parcel::call(DIRECTORY);
     call.string(name);
-    let reply = directory.transact(methods()?.is_declared, &call).with_context(|| format!("ask whether {name} is described"))?;
+    let reply = directory.transact(methods.is_declared, &call).with_context(|| format!("ask whether {name} is described"))?;
     let mut read = reply.read();
     status::ok(&mut read).with_context(|| format!("ask whether {name} is described"))?;
     read.bool().with_context(|| format!("read whether {name} is described"))
+}
+
+/// Whether the service directory can be asked whether a service is
+/// described at all: one that cannot, as Android 11's cannot, leaves
+/// whoever asks to read what the phone describes instead of asking it.
+#[cfg(target_os = "android")]
+pub fn declares() -> Result<bool> {
+    Ok(methods()?.sdk >= IS_DECLARED_ANSWERED)
 }
 
 #[cfg(test)]
@@ -167,9 +190,9 @@ mod tests {
     /// the first and the second of them.
     #[test]
     fn the_directory_of_android_16_numbers_its_methods_two_and_four_further_on() {
-        assert_eq!(methods_of(33), Methods { check_service: 2, add_service: 3, list_services: 4, is_declared: 7 }, "the 13 Ultra's recovery");
+        assert_eq!(methods_of(33), Methods { sdk: 33, check_service: 2, add_service: 3, list_services: 4, is_declared: 7 }, "the 13 Ultra's recovery");
         assert_eq!(methods_of(35), methods_of(33));
-        assert_eq!(methods_of(36), Methods { check_service: 3, add_service: 5, list_services: 6, is_declared: 9 }, "the 17 Ultra's recovery");
+        assert_eq!(methods_of(36), Methods { sdk: 36, check_service: 3, add_service: 5, list_services: 6, is_declared: 9 }, "the 17 Ultra's recovery");
         assert_eq!(methods_of(37), methods_of(36));
     }
 }
