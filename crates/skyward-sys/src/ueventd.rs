@@ -9,7 +9,7 @@ pub const GROUP_FILES: [&str; 2] = ["/vendor/etc/group", "/odm/etc/group"];
 /// The accounts Android fixes once and for all. The rules, and the init
 /// scripts of the phone's own programs, name them rather than their
 /// numbers, and a recovery has no list of its own to look them up in.
-const ACCOUNTS: [(&str, u32); 33] = [
+const ACCOUNTS: [(&str, u32); 38] = [
     ("root", 0),
     ("system", 1000),
     ("radio", 1001),
@@ -39,6 +39,13 @@ const ACCOUNTS: [(&str, u32); 33] = [
     ("audioserver", 1041),
     ("cameraserver", 1047),
     ("shell", 2000),
+    // The groups of the network, which a program of the phone's own that
+    // listens on a socket is put in, as ssgtzd is.
+    ("inet", 3003),
+    ("net_raw", 3004),
+    ("net_admin", 3005),
+    ("net_bw_stats", 3006),
+    ("net_bw_acct", 3007),
     ("readproc", 3009),
     ("wakelock", 3010),
     ("uhid", 3011),
