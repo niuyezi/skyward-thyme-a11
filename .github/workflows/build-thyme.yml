@@ -112,7 +112,7 @@ jobs:
       - name: Pack Skyward onto the boot partition
         id: pack
         env:
-          CMDLINE: ${{ inputs.cmdline }}
+          CMDLINE: ${{ inputs.cmdline || 'androidboot.force_normal_boot=0' }}
         run: |
           version="${GITHUB_SHA::7}"
           name="skyward-$version-thyme-ANXIN-12.5.3"
