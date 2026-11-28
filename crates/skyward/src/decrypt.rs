@@ -8,6 +8,7 @@ use skyward_crypto::data::{self, Closed, Opening};
 use skyward_crypto::keymint::KeyMint;
 use skyward_sys::worker::Worker;
 use std::os::fd::RawFd;
+use std::time::{Duration, Instant};
 
 pub enum Job {
     /// Open the partition as far as it opens with nothing a user knows.
@@ -54,13 +55,37 @@ impl Decryptor {
     }
 }
 
+/// How long to keep asking for the key service, and how often. The
+/// hardware service directory starts the key service itself, and takes its
+/// records away and restarts the services whenever it restarts, so a lookup
+/// that lands while that is happening is answered by a directory with
+/// nothing in it, or comes back saying the other side is gone.
+const KEY_SERVICE_TIMEOUT: Duration = Duration::from_secs(20);
+const KEY_SERVICE_POLL: Duration = Duration::from_millis(200);
+
+/// Reach the key service, asking again while it is not there to answer.
+fn key_service<'a>(binder: &'a Binder, hardware: &'a Binder) -> Result<KeyMint<'a>> {
+    let until = Instant::now() + KEY_SERVICE_TIMEOUT;
+    loop {
+        match KeyMint::open(binder, hardware) {
+            Ok(service) => return Ok(service),
+            Err(e) => {
+                if Instant::now() >= until {
+                    return Err(e);
+                }
+                std::thread::sleep(KEY_SERVICE_POLL);
+            }
+        }
+    }
+}
+
 /// Do `work` with the phone's key service, reached afresh for it, and say
 /// why it failed in words for the page.
 pub fn with_key_service<T>(work: impl FnOnce(&KeyMint) -> Result<T>) -> Result<T, String> {
     let done = (|| {
         let binder = Binder::open()?;
         let hardware = Binder::hardware()?;
-        let service = KeyMint::open(&binder, &hardware)?;
+        let service = key_service(&binder, &hardware)?;
         work(&service)
     })();
     done.map_err(|e| format!("{e:#}"))
@@ -78,7 +103,7 @@ pub fn with_data_keys<T>(work: impl FnOnce(Option<&KeyMint>) -> Result<T>) -> Re
         }
         let binder = Binder::open()?;
         let hardware = Binder::hardware()?;
-        let service = KeyMint::open(&binder, &hardware)?;
+        let service = key_service(&binder, &hardware)?;
         work(Some(&service))
     })();
     done.map_err(|e| format!("{e:#}"))

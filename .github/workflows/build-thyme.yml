@@ -25,6 +25,10 @@ on:
         description: SHA-256 of that image, in lowercase hex
         required: true
         default: ""
+      cmdline:
+        description: Command line for the image header, e.g. androidboot.force_normal_boot=0
+        required: false
+        default: ""
   push:
     paths:
       - ".github/workflows/build-thyme.yml"
@@ -107,10 +111,16 @@ jobs:
 
       - name: Pack Skyward onto the boot partition
         id: pack
+        env:
+          CMDLINE: ${{ inputs.cmdline }}
         run: |
           version="${GITHUB_SHA::7}"
           name="skyward-$version-thyme-ANXIN-12.5.3"
           mkdir -p out
+          extra=()
+          if [ -n "$CMDLINE" ]; then
+            extra+=(--cmdline "$CMDLINE")
+          fi
           tools/skyward-pack recovery \
             --stock stock/boot.img \
             --binary tools/skyward \
@@ -121,6 +131,7 @@ jobs:
             --mono-license resources/fonts/KirkMono-OFL.txt \
             --partition boot \
             --as-boot \
+            "${extra[@]}" \
             --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 

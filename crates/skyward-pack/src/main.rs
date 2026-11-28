@@ -79,6 +79,14 @@ enum Cmd {
         /// recovery's own properties are added.
         #[arg(long)]
         as_boot: bool,
+        /// A command line for the image's header, which the bootloader adds
+        /// to the one it passes the kernel. Writing `androidboot.force_normal_boot=0`
+        /// here asks the bootloader for the recovery, so a phone whose
+        /// recovery shares its boot partition comes up in it without a
+        /// request in misc. A bootloader that decides this itself, as
+        /// Xiaomi's does, overrides it.
+        #[arg(long)]
+        cmdline: Option<String>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -137,7 +145,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot, out } => {
+        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot, cmdline, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             // The ramdisk is written back compressed the way the phone's own
@@ -191,6 +199,17 @@ fn main() -> Result<()> {
                 rd.replace(paths::PROP_DEFAULT, props)?;
             }
             img.ramdisk = rd.encode_with(compression)?;
+            // A command line written here is the bootloader's to add to its
+            // own, and none of the stock one's is dropped: the phone's
+            // kernel needs what Xiaomi put there to find its partitions.
+            if let Some(line) = &cmdline {
+                let mut base = img.header.cmdline.trim_end_matches('\0').to_string();
+                if !base.is_empty() && !base.ends_with(' ') {
+                    base.push(' ');
+                }
+                base.push_str(line);
+                img.header.cmdline = base;
+            }
             let bytes = img.to_bytes()?;
             write(&out, &img, &avb::footed(&bytes, &partition, size, &Sha256::digest(&bytes))?)
         }
