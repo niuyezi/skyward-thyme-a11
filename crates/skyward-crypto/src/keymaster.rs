@@ -42,15 +42,11 @@ const KEY_REQUIRES_UPGRADE: i32 = -62;
 /// What a key is used for, and how, in the values the tags carry.
 const PURPOSE_DECRYPT: i32 = 1;
 const BLOCK_MODE_GCM: i32 = 32;
-const PADDING_NONE: i32 = 1;
 
 /// What a key parameter is tagged with. The high bits say which kind of
 /// value follows. These are the same tags KeyMint uses, by the same
 /// numbers, because both were carried over from Keymaster 3 unchanged.
-const TAG_PURPOSE: i32 = 536_870_913;
 const TAG_BLOCK_MODE: i32 = 536_870_916;
-const TAG_PADDING: i32 = 536_870_918;
-const TAG_MAC_LENGTH: i32 = 805_307_371;
 const TAG_APPLICATION_ID: i32 = -1_879_047_591;
 const TAG_NONCE: i32 = -1_879_047_191;
 
@@ -289,18 +285,17 @@ impl<'a> Keymaster<'a> {
         Ok(out)
     }
 
-    /// What the key service has to be told to use an AES-GCM key.
+    /// What the key service has to be told to use an AES-GCM key. The
+    /// phone's own storage code names only the block mode, what the key is
+    /// bound to, and the nonce: the purpose is the call's own first value
+    /// and is refused as a parameter, and the padding and the mac length
+    /// are what the key was made with and are refused as parameters too.
     fn gcm_params(m: &mut Message, app_id: &[u8], nonce: &[u8]) {
-        let mut list = vec![
-            (TAG_BLOCK_MODE, Value::Integer(BLOCK_MODE_GCM)),
-            (TAG_PADDING, Value::Integer(PADDING_NONE)),
-            (TAG_MAC_LENGTH, Value::Integer(128)),
-        ];
+        let mut list = vec![(TAG_BLOCK_MODE, Value::Integer(BLOCK_MODE_GCM))];
         if !app_id.is_empty() {
             list.push((TAG_APPLICATION_ID, Value::Blob(app_id)));
         }
         list.push((TAG_NONCE, Value::Blob(nonce)));
-        list.push((TAG_PURPOSE, Value::Integer(PURPOSE_DECRYPT)));
         parameters(m, &list);
     }
 
