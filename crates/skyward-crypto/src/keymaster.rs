@@ -61,71 +61,154 @@ enum Value<'a> {
     Blob(&'a [u8]),
 }
 
-/// Write one key parameter the way HIDL lays out a `KeyParameter`: the
-/// tag, then the union of the older kind, which names no arm of its own —
-/// the tag alone says which value follows — then a blob carried beside
-/// the union. The union is as wide as its widest arm, a `u64`, so a
-/// narrower value is written in the low bytes and the rest left at
-/// nothing.
-fn parameter(m: &mut Message, tag: i32, value: Value<'_>) {
-    m.i32(tag);
-    // The union is 8 bytes wide, as wide as its widest arm; the value is
-    // written in the low bytes and the rest left at nothing.
-    match &value {
+/// How a `KeyParameter` lies in memory, the way HIDL lays the structure
+/// out: the tag, then padding to the eight-byte boundary the union sits
+/// on, the union of the older kind, then a `vec<uint8_t>` blob with its
+/// pointer first. Where the blob points lives apart, as an object of its
+/// own inside this one.
+const TAG_POS: usize = 0;
+const UNION_POS: usize = 8;
+const BLOB_VEC_POS: usize = 16;
+const KEY_PARAMETER_BYTES: usize = 32;
+
+/// How a `KeyCharacteristics` lies in memory: two `vec<KeyParameter>`, each
+/// as wide as a vec is — where its elements lie, how many there are, and
+/// whether whoever holds it frees them.
+const SOFTWARE_VEC_BYTES: usize = 16;
+const KEY_CHARACTERISTICS_BYTES: usize = 2 * SOFTWARE_VEC_BYTES;
+
+/// A key parameter's cell and the bytes its blob points at. The blob's
+/// pointer field is left at nothing; whoever writes the parameters apart
+/// points it at the object that holds the blob.
+fn parameter_blob(tag: i32, value: &Value<'_>) -> ([u8; KEY_PARAMETER_BYTES], Vec<u8>) {
+    let mut cell = [0u8; KEY_PARAMETER_BYTES];
+    cell[TAG_POS..TAG_POS + 4].copy_from_slice(&tag.to_le_bytes());
+    let blob = match value {
         Value::Integer(v) => {
-            m.i32(*v);
-            m.i32(0);
+            cell[UNION_POS..UNION_POS + 4].copy_from_slice(&v.to_le_bytes());
+            Vec::new()
         }
-        // A blob is not in the union at all: the union is left at nothing
-        // and the bytes follow as a vector of their own.
-        Value::Blob(_) => {
-            m.i32(0);
-            m.i32(0);
-        }
-    }
-    match &value {
-        Value::Blob(v) => m.bytes(v),
-        _ => m.bytes(&[]),
-    }
+        Value::Blob(v) => v.to_vec(),
+    };
+    (cell, blob)
 }
 
-/// Write a run of key parameters: how many, then each.
+/// Write a run of key parameters as a `vec<KeyParameter>`: the vector's
+/// frame, the array of its elements, then one object per element for the
+/// blob that element carries. The blob is written for every element, empty
+/// or not, because the far side reads one for every element.
 fn parameters(m: &mut Message, list: &[(i32, Value<'_>)]) {
-    m.i32(list.len() as i32);
+    let count = list.len() as u32;
+    let mut data = Vec::with_capacity(count as usize * KEY_PARAMETER_BYTES);
+    let mut blobs: Vec<Vec<u8>> = Vec::with_capacity(count as usize);
     for (tag, value) in list {
-        // `Value` is not `Copy`; each is rebuilt from what the list holds.
-        match value {
-            Value::Integer(v) => parameter(m, *tag, Value::Integer(*v)),
-            Value::Blob(v) => parameter(m, *tag, Value::Blob(v)),
-        }
+        let (cell, blob) = parameter_blob(*tag, value);
+        data.extend_from_slice(&cell);
+        blobs.push(blob);
     }
+    let children: Vec<(usize, &[u8])> = blobs
+        .iter()
+        .enumerate()
+        .map(|(i, blob)| (i * KEY_PARAMETER_BYTES + BLOB_VEC_POS, blob.as_slice()))
+        .collect();
+    m.vec_with(count, &mut data, &children);
 }
+
+/// Read the elements of a `vec<KeyParameter>` whose array has just been
+/// taken, along with the blob each element carries. The blob is written for
+/// every element, empty or not, so one address follows per element.
+///
+/// What is answered is each element's tag and the number it carries, or,
+/// for a blob, how long it is, which is all this program reads of a key's
+/// authorizations.
+fn elements(read: &mut Answer, count: usize, cells: &[u8]) -> Result<Vec<(i32, i64)>> {
+    if cells.len() < count * KEY_PARAMETER_BYTES {
+        bail!("the key service said it answered {count} parameters in {} bytes", cells.len());
+    }
+    let mut out = Vec::with_capacity(count);
+    for i in 0..count {
+        let cell = &cells[i * KEY_PARAMETER_BYTES..(i + 1) * KEY_PARAMETER_BYTES];
+        let tag = i32::from_le_bytes(cell[TAG_POS..TAG_POS + 4].try_into().expect("four bytes"));
+        let number = i32::from_le_bytes(cell[UNION_POS..UNION_POS + 4].try_into().expect("four bytes")) as i64;
+        let blob = read.pointed().context("read the blob a parameter carries")?;
+        out.push((tag, if blob.is_empty() { number } else { blob.len() as i64 }));
+    }
+    Ok(out)
+}
+
+/// Read a `vec<KeyParameter>` the key service answered with as a value of
+/// its own: the frame saying where the elements lie and how many there are,
+/// then the elements' array.
+fn answered_parameters(read: &mut Answer) -> Result<Vec<(i32, i64)>> {
+    let (count, cells) = read.run().context("read the parameters a key answered with")?;
+    elements(read, count, cells)
+}
+
+/// Read a `vec<KeyParameter>` that lies inside a structure the key service
+/// answered with. A vec inside a structure is written as its elements' array
+/// alone — the count travels in the structure, where the vec's own size
+/// field lies — so what has already been read is the array and the count.
+fn embedded_parameters(read: &mut Answer, count: usize) -> Result<Vec<(i32, i64)>> {
+    let cells = read.pointed().context("read the parameters a key answered with")?;
+    elements(read, count, cells)
+}
+
+/// How a `HardwareAuthToken` lies in memory: three eight-byte numbers, the
+/// authenticator type in a word of its own, padding to the eight the
+/// timestamp sits on, then a `vec<uint8_t>` mac with its pointer first.
+const HAT_CHALLENGE_POS: usize = 0;
+const HAT_USER_POS: usize = 8;
+const HAT_AUTHENTICATOR_POS: usize = 16;
+const HAT_KIND_POS: usize = 24;
+const HAT_TIMESTAMP_POS: usize = 32;
+const HAT_MAC_VEC_POS: usize = 40;
+const HAT_BYTES: usize = 56;
 
 /// Hand over the note the secure world wrote when the user answered their
 /// screen lock. A key guarded by the screen lock is refused without it. An
 /// empty note is written as an empty token, which a key that is not guarded
 /// takes and is refused nothing for carrying.
+///
+/// The mac is a vec whether it holds anything or not, and the far side
+/// reads one for it either way: a token written without one leaves the far
+/// side reading past the end of the call. So an empty mac is written as a
+/// vec of nothing rather than left out.
 fn vouched(m: &mut Message, note: Option<&Token>) {
-    let Some(note) = note else {
-        // An empty token: every field at nothing, and no mac.
-        m.u64(0);
-        m.u64(0);
-        m.u64(0);
-        m.i32(0);
-        m.i32(0);
-        m.u64(0);
-        m.bytes(&[]);
-        return;
-    };
-    m.u64(note.challenge as u64);
-    m.u64(note.user as u64);
-    m.u64(note.authenticator as u64);
-    m.i32(note.kind);
-    // The type is a word of its own, and the timestamp that follows is
-    // eight wide, so a word of padding comes between them.
-    m.i32(0);
-    m.u64(note.when as u64);
-    m.bytes(&note.mac);
+    let mut cell = [0u8; HAT_BYTES];
+    let mac: Vec<u8>;
+    if let Some(note) = note {
+        cell[HAT_CHALLENGE_POS..HAT_CHALLENGE_POS + 8].copy_from_slice(&(note.challenge as u64).to_le_bytes());
+        cell[HAT_USER_POS..HAT_USER_POS + 8].copy_from_slice(&(note.user as u64).to_le_bytes());
+        cell[HAT_AUTHENTICATOR_POS..HAT_AUTHENTICATOR_POS + 8].copy_from_slice(&(note.authenticator as u64).to_le_bytes());
+        cell[HAT_KIND_POS..HAT_KIND_POS + 4].copy_from_slice(&note.kind.to_le_bytes());
+        cell[HAT_TIMESTAMP_POS..HAT_TIMESTAMP_POS + 8].copy_from_slice(&(note.when as u64).to_le_bytes());
+        mac = note.mac.to_vec();
+    } else {
+        mac = Vec::new();
+    }
+    let children = [(HAT_MAC_VEC_POS, mac.as_slice())];
+    m.object_with(&mut cell, &children);
+}
+
+/// How a `VerificationToken` lies in memory: the operation handle, the
+/// secure world's own time, a `vec<KeyParameter>` of what it verified, the
+/// security level in a word of its own, padding, then a `vec<uint8_t>` mac.
+const VT_CHALLENGE_POS: usize = 0;
+const VT_TIMESTAMP_POS: usize = 8;
+const VT_PARAMETERS_POS: usize = 16;
+const VT_LEVEL_POS: usize = 32;
+const VT_MAC_VEC_POS: usize = 40;
+const VT_BYTES: usize = 56;
+
+/// Hand over the token that proves another key service verified something.
+/// None of it is asked for here, and a token of nothing is written as one of
+/// nothing: every number at nothing and both of its vectors empty. The far
+/// side reads both vectors whether they hold anything or not.
+fn verified(m: &mut Message) {
+    let mut cell = [0u8; VT_BYTES];
+    let empty: &[u8] = &[];
+    let children = [(VT_PARAMETERS_POS, empty), (VT_MAC_VEC_POS, empty)];
+    m.object_with(&mut cell, &children);
 }
 
 /// The phone's key service of the older kind, as this program talks to it.
@@ -141,10 +224,13 @@ impl<'a> Keymaster<'a> {
         Ok(Keymaster { device })
     }
 
+    /// Ask the key service about itself. This call answers no error code of
+    /// its own: the level, the name and the author are the whole of it.
     pub fn hardware(&self) -> Result<Hardware> {
         let call = Message::call(HARDWARE_SERVICE);
         let reply = self.device.transact(GET_HARDWARE_INFO, &call).context("ask the key service about itself")?;
         let mut read = Answer::new(reply.bytes());
+        read.status().context("ask the key service about itself")?;
         let level = read.i32().context("read the security level")?;
         let name = read.text().context("read the key service's name")?;
         let author = read.text().context("read the key service's author")?;
@@ -168,18 +254,23 @@ impl<'a> Keymaster<'a> {
         call.bytes(&[]);
         let reply = self.device.transact(GET_KEY_CHARACTERISTICS, &call).context("ask what the key may be used for")?;
         let mut read = Answer::new(reply.bytes());
+        read.status().context("ask what the key may be used for")?;
         let code = read.i32().context("read how the key service took the call")?;
         if code != 0 {
             bail!("{}", fault(code));
         }
-        // The answer is a KeyCharacteristics: two vectors, the software's
-        // and the hardware's.
-        let mut out = Vec::new();
-        for _ in 0..2 {
-            for _ in 0..read.i32().context("read how many parameters a key has")?.max(0) {
-                out.push(read.parameter()?);
-            }
+        // The answer is a KeyCharacteristics: a structure of two vecs, the
+        // software's and the hardware's. The structure is written as one
+        // value; each vec inside it is written as its elements' array alone,
+        // with the count kept in the structure where that vec's size lies.
+        let cells = read.pointed().context("read the lists a key's parameters lie in")?;
+        if cells.len() < KEY_CHARACTERISTICS_BYTES {
+            bail!("a key's parameter lists came in {} bytes", cells.len());
         }
+        let count_at = |at: usize| u32::from_le_bytes(cells[at + 8..at + 12].try_into().expect("four bytes")) as usize;
+        let (software, hardware) = (count_at(0), count_at(SOFTWARE_VEC_BYTES));
+        let mut out = embedded_parameters(&mut read, software)?;
+        out.extend(embedded_parameters(&mut read, hardware)?);
         Ok(out)
     }
 
@@ -193,8 +284,8 @@ impl<'a> Keymaster<'a> {
             }
             Err(e) => return Err(e),
         };
-        let mut out = self.update(&operation, body)?;
-        out.extend_from_slice(&self.finish(&operation)?);
+        let mut out = self.update(operation, body)?;
+        out.extend_from_slice(&self.finish(operation)?);
         Ok(out)
     }
 
@@ -213,9 +304,10 @@ impl<'a> Keymaster<'a> {
         parameters(m, &list);
     }
 
-    /// Open a decryption with the key service and keep hold of it. The
-    /// operation is a separate object, reached by a handle the reply names.
-    fn begin(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&Token>) -> Result<Handle<'a>> {
+    /// Open a decryption with the key service. The operation is a number the
+    /// key service names, not an object of its own: every later call on it
+    /// goes to the same service and carries the number as a plain value.
+    fn begin(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8], note: Option<&Token>) -> Result<u64> {
         let mut call = Message::call(HARDWARE_SERVICE);
         call.i32(PURPOSE_DECRYPT);
         call.bytes(key_blob);
@@ -223,19 +315,15 @@ impl<'a> Keymaster<'a> {
         vouched(&mut call, note);
         let reply = self.device.transact(BEGIN, &call).context("start a decryption")?;
         let mut read = Answer::new(reply.bytes());
+        read.status().context("start a decryption")?;
         let code = read.i32().context("read how the key service took the start")?;
         if code != 0 {
             bail!("{}", fault(code));
         }
-        // The answer is the out-parameters, then the handle of the
-        // operation. Step over the parameters; the handle is what is kept.
-        for _ in 0..read.i32().context("read how many parameters the start answered")?.max(0) {
-            read.parameter()?;
-        }
-        match read.object().context("read the decryption the key service opened")? {
-            Some(h) => Handle::hold(reply.binder(), h),
-            None => bail!("the key service opened no decryption"),
-        }
+        // The answer is the out-parameters, then the number of the
+        // operation. Step over the parameters; the number is what is kept.
+        answered_parameters(&mut read).context("read what the start answered with")?;
+        read.u64().context("read the decryption the key service opened")
     }
 
     /// A key for the firmware running now, from one made under an older
@@ -246,53 +334,51 @@ impl<'a> Keymaster<'a> {
         Self::gcm_params(&mut call, app_id, nonce);
         let reply = self.device.transact(UPGRADE_KEY, &call).context("renew the key")?;
         let mut read = Answer::new(reply.bytes());
+        read.status().context("renew the key")?;
         let code = read.i32().context("read how the key service took the renewal")?;
         if code != 0 {
             bail!("{}", fault(code));
         }
-        Ok(read.pointed().context("read the renewed key")?.to_vec())
+        Ok(read.blob().context("read the renewed key")?.to_vec())
     }
 
-    fn update(&self, operation: &Handle, input: &[u8]) -> Result<Vec<u8>> {
+    fn update(&self, operation: u64, input: &[u8]) -> Result<Vec<u8>> {
         let mut call = Message::call(HARDWARE_SERVICE);
-        call.u64(operation.number());
+        call.u64(operation);
         parameters(&mut call, &[]);
         call.bytes(input);
         vouched(&mut call, None);
-        // The verification token: none.
-        call.bytes(&[]);
-        let reply = operation.transact(UPDATE, &call).context("feed the decryption")?;
+        verified(&mut call);
+        let reply = self.device.transact(UPDATE, &call).context("feed the decryption")?;
         let mut read = Answer::new(reply.bytes());
+        read.status().context("feed the decryption")?;
         let code = read.i32().context("read how the decryption took the input")?;
         if code != 0 {
             bail!("{}", fault(code));
         }
         // The input consumed, the out-parameters, then the output.
         read.i32().context("read how much input was taken")?;
-        for _ in 0..read.i32().context("read how many parameters the decryption answered")?.max(0) {
-            read.parameter()?;
-        }
-        Ok(read.pointed().context("read what the decryption gave back")?.to_vec())
+        answered_parameters(&mut read).context("read what the decryption answered with")?;
+        Ok(read.blob().context("read what the decryption gave back")?.to_vec())
     }
 
-    fn finish(&self, operation: &Handle) -> Result<Vec<u8>> {
+    fn finish(&self, operation: u64) -> Result<Vec<u8>> {
         let mut call = Message::call(HARDWARE_SERVICE);
-        call.u64(operation.number());
+        call.u64(operation);
         parameters(&mut call, &[]);
         call.bytes(&[]);
         call.bytes(&[]);
         vouched(&mut call, None);
-        call.bytes(&[]);
-        let reply = operation.transact(FINISH, &call).context("close the decryption")?;
+        verified(&mut call);
+        let reply = self.device.transact(FINISH, &call).context("close the decryption")?;
         let mut read = Answer::new(reply.bytes());
+        read.status().context("close the decryption")?;
         let code = read.i32().context("read how the decryption ended")?;
         if code != 0 {
             bail!("{}", fault(code));
         }
-        for _ in 0..read.i32().context("read how many parameters the end answered")?.max(0) {
-            read.parameter()?;
-        }
-        Ok(read.pointed().context("read what the decryption ended with")?.to_vec())
+        answered_parameters(&mut read).context("read what the end answered with")?;
+        Ok(read.blob().context("read what the decryption ended with")?.to_vec())
     }
 
     /// Whether the secure world will unwrap the key at all: a decryption is
@@ -301,8 +387,14 @@ impl<'a> Keymaster<'a> {
     pub fn usable(&self, key_blob: &[u8], app_id: &[u8]) -> Result<()> {
         let operation = self.begin(key_blob, app_id, &[0; NONCE_BYTES], None)?;
         let mut call = Message::call(HARDWARE_SERVICE);
-        call.u64(operation.number());
-        operation.transact(ABORT, &call)?;
+        call.u64(operation);
+        let reply = self.device.transact(ABORT, &call).context("drop the decryption")?;
+        let mut read = Answer::new(reply.bytes());
+        read.status().context("drop the decryption")?;
+        let code = read.i32().context("read how the decryption was dropped")?;
+        if code != 0 {
+            bail!("{}", fault(code));
+        }
         Ok(())
     }
 }

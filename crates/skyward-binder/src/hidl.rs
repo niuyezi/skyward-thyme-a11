@@ -27,8 +27,9 @@ const ADDRESS_BYTES: usize = 40;
 const OBJECT_BYTES: usize = 24;
 
 /// A frame as the phone's own libraries hold one in memory: where the bytes
-/// are, how many there are, and whether whoever holds it frees them.
-const FRAME_BYTES: usize = 16;
+/// are, how many there are, and whether whoever holds it frees them. A
+/// string and a vec of the older kind both open with one.
+pub const FRAME_BYTES: usize = 16;
 
 /// What the driver copies for an address is rounded up to a whole word.
 const WORD: u64 = 8;
@@ -84,8 +85,102 @@ impl Message {
         self.framed(at, value.len(), value.len() + 1);
     }
 
-    /// Hold on to bytes the driver will read, and say where they are.
+    /// One structure by itself, holding `content` as it lies in memory: how
+    /// a structure with nothing of its own to point at is handed over.
+    /// Answer which object it is, for any child objects it carries to name
+    /// it as their holder.
+    pub fn object(&mut self, content: &[u8]) -> usize {
+        let at = self.keep(content.to_vec());
+        self.buffer(at, content.len(), None)
+    }
+
+    /// A structure holding `content`, with `children` objects the driver
+    /// copies in and whose addresses it writes into `content` at the named
+    /// offsets: how a structure with a vec or a string inside it is handed
+    /// over. Each child's address and length are written where the phone's
+    /// own library keeps a `hidl_vec`'s buffer and size, and each child is
+    /// then registered as an object sitting inside this one, so the driver
+    /// copies it and writes its address into `content` where that field
+    /// lies.
+    ///
+    /// A child that is empty is still registered: the phone's own library
+    /// writes one for every vec, and the far side reads one for every vec
+    /// whether it holds anything or not.
+    pub fn object_with(&mut self, content: &mut [u8], children: &[(usize, &[u8])]) {
+        // Keep every child first, so its address is stable while `content`
+        // is being filled and copied.
+        let mut ats = Vec::with_capacity(children.len());
+        for (off, child) in children {
+            let at = self.keep(child.to_vec());
+            content[*off..*off + 8].copy_from_slice(&at.to_le_bytes());
+            content[*off + 8..*off + 12].copy_from_slice(&(child.len() as u32).to_le_bytes());
+            ats.push(at);
+        }
+        let at = self.keep(content.to_vec());
+        let which = self.buffer(at, content.len(), None);
+        for (i, (off, child)) in children.iter().enumerate() {
+            self.buffer(ats[i], child.len(), Some((which, *off)));
+        }
+    }
+
+    /// A vec handed over at the top level, written as the phone's own
+    /// library writes one: a frame holding where the elements lie and how
+    /// many there are, then the elements themselves as an object inside
+    /// that frame. `children` are further objects pointed at from inside
+    /// the elements — each element's own blobs — at their offsets, each
+    /// registered as sitting inside the elements' object.
+    pub fn vec_with(&mut self, count: u32, data: &mut [u8], children: &[(usize, &[u8])]) {
+        let mut ats = Vec::with_capacity(children.len());
+        for (off, child) in children {
+            let at = self.keep(child.to_vec());
+            data[*off..*off + 8].copy_from_slice(&at.to_le_bytes());
+            data[*off + 8..*off + 12].copy_from_slice(&(child.len() as u32).to_le_bytes());
+            ats.push(at);
+        }
+        let data_at = self.keep(data.to_vec());
+        // The frame the phone's own library keeps in memory for a vec:
+        // where its elements lie — rewritten to the elements' object
+        // below —, how many there are, and that whoever holds it does not
+        // free them.
+        let mut frame = vec![0u8; FRAME_BYTES];
+        frame[0..8].copy_from_slice(&data_at.to_le_bytes());
+        frame[8..12].copy_from_slice(&count.to_le_bytes());
+        let frame_at = self.keep(frame);
+        let frame_object = self.buffer(frame_at, FRAME_BYTES, None);
+        let data_object = self.buffer(data_at, data.len(), Some((frame_object, 0)));
+        for (i, (off, child)) in children.iter().enumerate() {
+            self.buffer(ats[i], child.len(), Some((data_object, *off)));
+        }
+    }
+
+    /// Write one object among the values and say where it sits: an address
+    /// the driver finds, pointing at bytes it copies into the far side's
+    /// own room. `inside` names the object this one is written into and
+    /// where inside it, which is how the driver writes an embedded
+    /// object's address into its holder. The object is as long as the
+    /// driver's own layout of it, no more.
+    fn buffer(&mut self, at: u64, length: usize, inside: Option<(usize, usize)>) -> usize {
+        let which = self.addresses.len();
+        self.addresses.push(self.data.len() as u64);
+        self.data.extend_from_slice(&ADDRESS.to_le_bytes());
+        self.data.extend_from_slice(&inside.map_or(0, |_| INSIDE_ANOTHER).to_le_bytes());
+        self.data.extend_from_slice(&at.to_le_bytes());
+        self.data.extend_from_slice(&(length as u64).to_le_bytes());
+        self.data.extend_from_slice(&(inside.map_or(0, |p| p.0) as u64).to_le_bytes());
+        self.data.extend_from_slice(&(inside.map_or(0, |p| p.1) as u64).to_le_bytes());
+        self.pointed += (length as u64).next_multiple_of(WORD);
+        which
+    }
+
+    /// Hold on to bytes the driver will read, and say where they are. A run
+    /// of nothing still gets one byte to point at: the driver is told to
+    /// copy from the address whether the run holds anything or not, and it
+    /// checks the address before it copies.
     fn keep(&mut self, bytes: Vec<u8>) -> u64 {
+        let mut bytes = bytes;
+        if bytes.is_empty() {
+            bytes.push(0);
+        }
         let bytes = bytes.into_boxed_slice();
         let at = bytes.as_ptr() as u64;
         self.held.push(bytes);
@@ -101,25 +196,8 @@ impl Message {
         // Whoever reads the frame does not free what it points at.
         frame.extend_from_slice(&[0; 4]);
         let frame_at = self.keep(frame);
-        let parent = self.address(frame_at, FRAME_BYTES, None);
-        self.address(at, length, Some(parent));
-    }
-
-    /// Write an address among the values and say where it sits, which is
-    /// how the driver finds it. The answer is which address this is, for
-    /// the one pointing inside it to name.
-    fn address(&mut self, at: u64, length: usize, inside: Option<usize>) -> usize {
-        let which = self.addresses.len();
-        self.addresses.push(self.data.len() as u64);
-        self.data.extend_from_slice(&ADDRESS.to_le_bytes());
-        self.data.extend_from_slice(&inside.map_or(0, |_| INSIDE_ANOTHER).to_le_bytes());
-        self.data.extend_from_slice(&at.to_le_bytes());
-        self.data.extend_from_slice(&(length as u64).to_le_bytes());
-        self.data.extend_from_slice(&(inside.unwrap_or(0) as u64).to_le_bytes());
-        // The address inside the frame is the frame's first field.
-        self.data.extend_from_slice(&0u64.to_le_bytes());
-        self.pointed += (length as u64).next_multiple_of(WORD);
-        which
+        let parent = self.buffer(frame_at, FRAME_BYTES, None);
+        self.buffer(at, length, Some((parent, 0)));
     }
 }
 
@@ -149,20 +227,39 @@ impl<'a> Answer<'a> {
     }
 
     /// Whether the call went through. A service that refused says so first,
-    /// and says why in the text that follows.
+    /// and says why in a plain string of the driver's own — not a HIDL one:
+    /// how many characters, then the characters two bytes each, then a
+    /// terminator — that follows.
     pub fn status(&mut self) -> Result<()> {
         let code = self.i32().context("read whether the service took the call")?;
         if code == 0 {
             return Ok(());
         }
-        match self.text() {
+        match self.plain_text() {
             Ok(why) if !why.is_empty() => bail!("the service refused the call: {why}"),
             _ => bail!("the service refused the call with its code {code}"),
         }
     }
 
+    /// A string the driver writes itself rather than a HIDL one: how many
+    /// characters, then the characters two bytes each, then a terminator,
+    /// padded to four.
+    fn plain_text(&mut self) -> Result<String> {
+        let units = self.i32()?;
+        if units < 0 {
+            bail!("text of length {units} was read where some was expected");
+        }
+        let raw = self.take((units as usize + 1) * 2)?;
+        let utf16: Vec<u16> = raw[..units as usize * 2].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
+        Ok(String::from_utf16_lossy(&utf16))
+    }
+
     pub fn i32(&mut self) -> Result<i32> {
         Ok(i32::from_le_bytes(self.take(4)?.try_into().expect("four bytes")))
+    }
+
+    pub fn u64(&mut self) -> Result<u64> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().expect("eight bytes")))
     }
 
     /// A truth value: a byte, padded to four as everything is.
@@ -172,7 +269,8 @@ impl<'a> Answer<'a> {
 
     /// The bytes an address in the reply points at. The driver has already
     /// moved them into this program's own room and rewritten the address,
-    /// so they are read where they lie.
+    /// so they are read where they lie. An address that points at nothing
+    /// and holds nothing is an empty run of bytes.
     pub fn pointed(&mut self) -> Result<&'a [u8]> {
         let raw = self.take(ADDRESS_BYTES)?;
         let kind = u32::from_le_bytes(raw[0..4].try_into().expect("four bytes"));
@@ -181,41 +279,48 @@ impl<'a> Answer<'a> {
         }
         let at = u64::from_le_bytes(raw[8..16].try_into().expect("eight bytes"));
         let length = u64::from_le_bytes(raw[16..24].try_into().expect("eight bytes"));
+        if length == 0 {
+            return Ok(&[]);
+        }
         if at == 0 {
             bail!("the service left out something the call asked for");
         }
         Ok(unsafe { std::slice::from_raw_parts(at as *const u8, length as usize) })
     }
 
-    /// One key parameter as HIDL writes it: the tag, then the union of the
-    /// older kind, which names no arm of its own — the tag alone says
-    /// which value follows — then a blob carried beside the union. The
-    /// answer is the tag and the number the value says, or, for a blob,
-    /// how long it is, which is all this program reads of a key's
-    /// authorizations.
-    pub fn parameter(&mut self) -> Result<(i32, i64)> {
-        let tag = self.i32()?;
-        // The union is 8 bytes wide, as wide as its widest arm; the value
-        // is read from the low bytes.
-        let raw = self.take(8)?;
-        let number = i32::from_le_bytes(raw[0..4].try_into().expect("four bytes")) as i64;
-        let blob = self.pointed()?;
-        let value = if blob.is_empty() { number } else { blob.len() as i64 };
-        Ok((tag, value))
+    /// A vec or a string in the reply, as the phone's own library writes
+    /// one: a frame saying how many there are and where they lie, then the
+    /// things themselves. Both addresses have already been moved into this
+    /// program's own room, so what is answered is how many the frame says
+    /// and the bytes that were carried. A vec of nothing carries nothing,
+    /// and answers a count of nothing.
+    pub fn run(&mut self) -> Result<(usize, &'a [u8])> {
+        let frame = self.pointed().context("read the frame of a run")?;
+        if frame.len() < FRAME_BYTES {
+            bail!("a run's frame holds {} bytes", frame.len());
+        }
+        let count = u32::from_le_bytes(frame[8..12].try_into().expect("four bytes")) as usize;
+        let data = self.pointed().context("read a run")?;
+        Ok((count, data))
     }
 
-    /// Text the far side wrote as its own value rather than as a frame.
+    /// The bytes a `vec<uint8_t>` in the reply carries.
+    pub fn blob(&mut self) -> Result<&'a [u8]> {
+        let (count, data) = self.run().context("read a run of bytes")?;
+        if data.len() < count {
+            bail!("a run of bytes said it held {count} but carried {}", data.len());
+        }
+        Ok(&data[..count])
+    }
+
+    /// Text the far side wrote as its own value, carried as UTF-8 and
+    /// counted without the terminator that follows it.
     pub fn text(&mut self) -> Result<String> {
-        let units = self.i32()?;
-        if units < 0 {
-            bail!("text of length {units} was read where some was expected");
+        let (units, characters) = self.run().context("read a string")?;
+        if characters.len() < units {
+            bail!("a string said it holds {units} characters but carried {}", characters.len());
         }
-        let raw = self.take((units as usize + 1) * 2)?;
-        while !self.at.is_multiple_of(4) && self.at < self.data.len() {
-            self.at += 1;
-        }
-        let utf16: Vec<u16> = raw[..units as usize * 2].as_chunks::<2>().0.iter().map(|c| u16::from_le_bytes(*c)).collect();
-        Ok(String::from_utf16_lossy(&utf16))
+        Ok(String::from_utf8_lossy(&characters[..units]).into_owned())
     }
 
     /// The handle of an object in the answering process.
