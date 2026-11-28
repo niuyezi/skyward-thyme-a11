@@ -256,6 +256,9 @@ pub struct Bar<'a> {
     /// Where the clock starts, in dp from the screen's left edge, where a
     /// camera hole in that corner covers where it starts by default.
     pub clock_x_dp: Option<f32>,
+    /// How far the clock is moved from where the bar puts it, in dp: down
+    /// by a positive number, up by a negative one.
+    pub clock_y_dp: Option<f32>,
     pub battery: Option<(u8, Option<Bolt>)>,
     /// The network joined, while it has an address.
     pub wlan: Option<WlanMark>,
@@ -342,7 +345,8 @@ pub fn status_bar(c: &mut Canvas, t: &Theme, f: &Fonts, bar: &Bar, ink: Rgba) {
     // clock, or to the right of a camera hole that covers that place.
     // Digits carry no descender, so centre on half their height (≈0.72 em).
     let x = bar.clock_x_dp.map_or(m.status_x, |dp| m.dp(dp));
-    c.text(&f.status, bar.clock, x, cy + m.status_px * 0.36, m.status_px, ink, None);
+    let y = bar.clock_y_dp.map_or(cy + m.status_px * 0.36, |dp| cy + m.dp(dp) + m.status_px * 0.36);
+    c.text(&f.status, bar.clock, x, y, m.status_px, ink, None);
 }
 
 /// Room between the marks on the bar's right, as the stock bar leaves it
@@ -3041,7 +3045,7 @@ mod tests {
         let f = crate::font::bundled();
         let draw = |mark: WlanMark| {
             let mut c = Canvas::filled(1200, 160, t.pal.bg);
-            let bar = Bar { clock: "01:27", clock_x_dp: None, battery: Some((40, Some(Bolt::Charging))), wlan: Some(mark), data: None, slot: None, temp: None };
+            let bar = Bar { clock: "01:27", clock_x_dp: None, clock_y_dp: None, battery: Some((40, Some(Bolt::Charging))), wlan: Some(mark), data: None, slot: None, temp: None };
             status_bar(&mut c, &t, &f, &bar, t.pal.status);
             c
         };
@@ -3079,7 +3083,7 @@ mod tests {
         let f = crate::font::bundled();
         let mut c = Canvas::filled(1200, 160, t.pal.bg);
         let wlan = Some(WlanMark { level: 3, receiving: true, sending: true, speed: "0.00".into(), unit: "KB/s" });
-        let bar = Bar { clock: "01:27", clock_x_dp: None, battery: Some((40, None)), wlan, data: Some(false), slot: Some("B"), temp: Some(362) };
+        let bar = Bar { clock: "01:27", clock_x_dp: None, clock_y_dp: None, battery: Some((40, None)), wlan, data: Some(false), slot: Some("B"), temp: Some(362) };
         status_bar(&mut c, &t, &f, &bar, t.pal.status);
         // Runs of inked columns on the bar's right half, those a few pixels
         // apart taken as one mark.
@@ -3151,7 +3155,7 @@ mod tests {
         let f = crate::font::bundled();
         let draw = |kind| {
             let mut c = Canvas::filled(1200, 160, Rgba::rgb(0, 0, 0));
-            let bar = Bar { clock: "01:27", clock_x_dp: None, battery: Some((64, Some(kind))), wlan: None, data: None, slot: None, temp: None };
+            let bar = Bar { clock: "01:27", clock_x_dp: None, clock_y_dp: None, battery: Some((64, Some(kind))), wlan: None, data: None, slot: None, temp: None };
             status_bar(&mut c, &t, &f, &bar, t.pal.status);
             c
         };

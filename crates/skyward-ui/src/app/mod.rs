@@ -1200,6 +1200,9 @@ pub struct App {
     /// Where the clock starts, in dp from the screen's left edge, where a
     /// camera hole in that corner covers where it starts by default.
     pub clock_x_dp: Option<f32>,
+    /// How far the clock is moved from where the status bar puts it, in dp:
+    /// down by a positive number, up by a negative one.
+    pub clock_y_dp: Option<f32>,
 }
 
 impl App {
@@ -1267,6 +1270,7 @@ impl App {
             h,
             px_per_dp,
             clock_x_dp: None,
+            clock_y_dp: None,
         }
     }
 

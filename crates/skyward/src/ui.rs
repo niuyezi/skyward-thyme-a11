@@ -1302,6 +1302,7 @@ impl<'a> Pages<'a> {
         let mut app = App::new(first, w, h, cfg.display.density as f32 / 160.0);
         app.set_screen_corners(cfg.display.corner_radius as f32);
         app.clock_x_dp = cfg.display.clock_x_dp;
+        app.clock_y_dp = cfg.display.clock_y_dp;
         // The settings kept from the starts before are back before the first
         // frame, and before file transfer starts with its switch and the time
         // zone. The pages speak the language chosen then, or else the one the

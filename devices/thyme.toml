@@ -20,8 +20,13 @@ refresh_hz = 60
 # The camera hole sits in the screen's top left corner, over where the
 # clock starts by default; the clock starts to the right of the hole. The
 # hole's right edge reaches about 150 px from the left edge at 440 dpi,
-# which is 55 dp; the clock starts there rather than under it.
-clock_x_dp = 55.0
+# which is 55 dp; the clock starts a little past that so the first digit
+# is clear of the hole rather than clipping into it.
+clock_x_dp = 62.0
+# The hole's lower edge sits level with the clock's lowest pixels, which
+# leaves the clock looking low against the hole rather than centred on it;
+# the clock is lifted a little to sit beside the hole's middle.
+clock_y_dp = -6.0
 
 [modules]
 # A phone whose kernel is 4.19, before GKI: its modules are all on the

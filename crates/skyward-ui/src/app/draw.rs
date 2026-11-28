@@ -13,6 +13,7 @@ impl App {
         Bar {
             clock,
             clock_x_dp: self.clock_x_dp,
+            clock_y_dp: self.clock_y_dp,
             battery: battery.map(|b| (b.level, b.charging().then_some(if b.quick { Bolt::Quick } else { Bolt::Charging }))),
             wlan: self.wlan_mark(),
             data: match self.state.data {

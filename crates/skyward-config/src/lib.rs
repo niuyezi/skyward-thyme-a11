@@ -310,6 +310,11 @@ pub struct Display {
     /// camera hole in that corner covers where it starts by default.
     #[serde(default)]
     pub clock_x_dp: Option<f32>,
+    /// How far the clock is moved from where the status bar puts it, in dp:
+    /// down by a positive number, up by a negative one, where a camera hole
+    /// in the corner leaves the clock sitting too low against its edge.
+    #[serde(default)]
+    pub clock_y_dp: Option<f32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
