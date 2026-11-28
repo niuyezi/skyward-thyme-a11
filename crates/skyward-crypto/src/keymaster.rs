@@ -298,7 +298,7 @@ impl<'a> Keymaster<'a> {
         let operation = match self.begin(key_blob, app_id, nonce, note) {
             Ok(operation) => operation,
             Err(e) if refused_with(&e) == Some(KEY_REQUIRES_UPGRADE) => {
-                let renewed = self.upgrade(key_blob, app_id, nonce).context("renew the key for the firmware running now")?;
+                let renewed = self.upgrade(key_blob, nonce, note).context("renew the key for the firmware running now")?;
                 self.begin(&renewed, app_id, nonce, note)?
             }
             Err(e) => return Err(e),
@@ -326,6 +326,20 @@ impl<'a> Keymaster<'a> {
         parameters(m, &list);
     }
 
+    /// What `upgradeKey` is told: the block mode and the padding the key was
+    /// made with, and the nonce of the blob being renewed. The application id
+    /// is deliberately not among them: the key service takes the one the blob
+    /// carries and refuses a call that names another, which is what an
+    /// upgrade written with the caller's own application id runs into.
+    fn upgrade_params(m: &mut Message, nonce: &[u8]) {
+        let list = vec![
+            (TAG_BLOCK_MODE, Value::Integer(BLOCK_MODE_GCM)),
+            (TAG_PADDING, Value::Integer(PADDING_NONE)),
+            (TAG_NONCE, Value::Blob(nonce)),
+        ];
+        parameters(m, &list);
+    }
+
     /// Open a decryption with the key service. The operation is a number the
     /// key service names, not an object of its own: every later call on it
     /// goes to the same service and carries the number as a plain value.
@@ -350,10 +364,19 @@ impl<'a> Keymaster<'a> {
 
     /// A key for the firmware running now, from one made under an older
     /// build.
-    fn upgrade(&self, key_blob: &[u8], app_id: &[u8], nonce: &[u8]) -> Result<Vec<u8>> {
+    ///
+    /// `upgradeKey` is called the way the phone's own storage code calls it:
+    /// the key's own application id is left out of the parameters, since the
+    /// key service compares what is handed over against what the blob was
+    /// sealed with, and refuses a call that names a different one; and the
+    /// note the secure world wrote for the screen lock is handed over, since
+    /// a key guarded by that lock will not be renewed without it. A key that
+    /// is not guarded takes an empty note.
+    fn upgrade(&self, key_blob: &[u8], nonce: &[u8], note: Option<&Token>) -> Result<Vec<u8>> {
         let mut call = Message::call(HARDWARE_SERVICE);
         call.bytes(key_blob);
-        Self::gcm_params(&mut call, app_id, nonce);
+        Self::upgrade_params(&mut call, nonce);
+        vouched(&mut call, note);
         let reply = self.device.transact(UPGRADE_KEY, &call).context("renew the key")?;
         let mut read = Answer::new(reply.bytes());
         read.status().context("renew the key")?;
