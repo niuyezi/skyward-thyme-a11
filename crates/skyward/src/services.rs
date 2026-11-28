@@ -62,11 +62,30 @@ const LIBRARY_PATH: &str = "LD_LIBRARY_PATH";
 pub fn start(programs: &[Started], libraries: Option<&Path>) -> Result<()> {
     let known = accounts();
     for program in programs {
-        let (s, who, given) = readied(program, libraries, &known)?;
+        let (s, who, given) = match readied(program, libraries, &known) {
+            Ok(readied) => readied,
+            // A program run once that is not there, as one of a script a
+            // build this configuration was not made for does not carry,
+            // leaves the rest of what the recovery starts alone: only its
+            // absence goes to the kernel log.
+            Err(e) if program.service.oneshot => {
+                skyward_sys::kmsg(&format!("{} not run: {e:#}", program.service.path))?;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
         if s.oneshot {
             let status = to_its_end(&s, &who, &given)?;
-            ensure!(status.success(), "{} {} ended: {status}", s.path, s.args.join(" "));
-            skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
+            // A program run once is not what the recovery is for: one of
+            // the phone's own that ends badly, as one of a script this
+            // build does not carry or one that a file its partition lacks
+            // stops, must not keep the recovery from the rest of what it
+            // starts. Its ending goes to the kernel log either way.
+            if status.success() {
+                skyward_sys::kmsg(&format!("ran {} {}", s.path, s.args.join(" ")))?;
+            } else {
+                skyward_sys::kmsg(&format!("{} {} ended: {status}", s.path, s.args.join(" ")))?;
+            }
             continue;
         }
         if program.anew {

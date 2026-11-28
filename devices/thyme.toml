@@ -65,10 +65,11 @@ mounted = ["persist"]
 # from powering down until it is told otherwise. The script hands the
 # clusters to WALT and lets idle CPUs power down. Without it the CPUs stay
 # at their highest clock and voltage even while idle, and the phone slowly
-# heats up.
+# heats up. This MIUI build names it init.qcom.post_boot.sh, where a stock
+# Qualcomm vendor names the same script init.kernel.post_boot.sh.
 [[service]]
 path = "/vendor/bin/sh"
-args = ["/vendor/bin/init.kernel.post_boot.sh"]
+args = ["/vendor/bin/init.qcom.post_boot.sh"]
 libraries = ["/system/lib64", "/vendor/lib64"]
 oneshot = true
 user = "root"
