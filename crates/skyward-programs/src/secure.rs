@@ -221,7 +221,12 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
     }
     let keys = match keys_kind {
         Kind::Aidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymint") && !file.contains("strongbox"))?,
-        Kind::Hidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymaster") && !file.contains("strongbox"))?,
+        // The older kind's program is named with the version it serves,
+        // as android.hardware.keymaster@4.0-service-qti is: a helper of
+        // the phone's own, as keymasterd, which mends the key service
+        // after a subsystem restart and registers nothing, is named
+        // without one and is left alone.
+        Kind::Hidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymaster@") && !file.contains("strongbox"))?,
     };
     let ready_with = match keys_kind {
         Kind::Aidl => Ready::Service(keys_name.clone()),
