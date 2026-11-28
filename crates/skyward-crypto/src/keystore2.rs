@@ -12,12 +12,13 @@ pub const DATABASE: &str = "/data/misc/keystore/persistent.sqlite";
 const KEY_BLOB: i64 = 0;
 
 /// The handle the secure world knows the key named `alias` by. The
-/// database is opened as it lies, without being written to or waiting on
-/// anyone, since the phone it belongs to is not running.
+/// database is opened read-only, without being written to or waiting on
+/// anyone, since the phone it belongs to is not running. It is not opened
+/// as an immutable file: the key service keeps its latest writes in a log
+/// beside the database until it folds them in, and a file read as
+/// immutable is read without that log.
 pub fn key_blob(database: &Path, alias: &str) -> Result<Vec<u8>> {
-    let at = format!("file:{}?immutable=1", database.display());
-    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
-    let db = rusqlite::Connection::open_with_flags(&at, flags).with_context(|| format!("open {}", database.display()))?;
+    let db = crate::sqlite::read_only(database)?;
     let mut query = db
         .prepare(
             "SELECT b.blob FROM blobentry b JOIN keyentry k ON b.keyentryid = k.id

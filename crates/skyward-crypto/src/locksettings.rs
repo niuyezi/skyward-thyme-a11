@@ -28,13 +28,15 @@ pub fn current_protector(database: &Path, user: u32) -> Result<Option<String>> {
 }
 
 /// What the lock settings keep for `user` under `name`, where they keep
-/// anything. The database is opened as it lies, without being written to
-/// or waiting on anyone, since the phone it belongs to is not running; it
-/// is written without a log of its own, so what it holds is all of it.
+/// anything. The database is opened read-only, without being written to or
+/// waiting on anyone, since the phone it belongs to is not running. It is
+/// not opened as an immutable file, though: the phone keeps its latest
+/// writes in a log beside the database (`locksettings.db-wal`) until it
+/// folds them in, and a file read as immutable is read without that log,
+/// which answers with a value the phone has already replaced. Read-only is
+/// enough to leave it untouched and still see what the log holds.
 fn value(database: &Path, name: &str, user: u32) -> Result<Option<String>> {
-    let at = format!("file:{}?immutable=1", database.display());
-    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_URI;
-    let db = rusqlite::Connection::open_with_flags(&at, flags).with_context(|| format!("open {}", database.display()))?;
+    let db = crate::sqlite::read_only(database)?;
     let mut query = db
         .prepare("SELECT value FROM locksettings WHERE name = ?1 AND user = ?2")
         .context("ask the lock settings what they keep")?;
