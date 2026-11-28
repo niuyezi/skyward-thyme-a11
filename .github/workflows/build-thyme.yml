@@ -111,16 +111,10 @@ jobs:
 
       - name: Pack Skyward onto the boot partition
         id: pack
-        env:
-          CMDLINE: ${{ inputs.cmdline || 'androidboot.force_normal_boot=0' }}
         run: |
           version="${GITHUB_SHA::7}"
           name="skyward-$version-thyme-ANXIN-12.5.3"
           mkdir -p out
-          extra=()
-          if [ -n "$CMDLINE" ]; then
-            extra+=(--cmdline "$CMDLINE")
-          fi
           tools/skyward-pack recovery \
             --stock stock/boot.img \
             --binary tools/skyward \
@@ -130,8 +124,7 @@ jobs:
             --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt \
             --partition boot \
-            --as-boot \
-            "${extra[@]}" \
+            --as-recovery \
             --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 

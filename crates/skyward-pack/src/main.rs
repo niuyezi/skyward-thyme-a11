@@ -87,6 +87,13 @@ enum Cmd {
         /// Xiaomi's does, overrides it.
         #[arg(long)]
         cmdline: Option<String>,
+        /// Drop the installed system's first stage from the ramdisk, so
+        /// init reads the ramdisk as the recovery's own and runs the
+        /// recovery whatever the bootloader was asked for. The phone then
+        /// starts into the recovery every time, and the system is only
+        /// reachable from it.
+        #[arg(long)]
+        as_recovery: bool,
         #[arg(long)]
         out: PathBuf,
     },
@@ -145,7 +152,7 @@ fn main() -> Result<()> {
             img.kernel = BootImage::read(&kernel)?.kernel;
             write(&out, &img, &img.to_bytes()?)
         }
-        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot, cmdline, out } => {
+        Cmd::Recovery { stock, binary, system_init, config, font, mono, mono_license, partition, as_boot, cmdline, as_recovery, out } => {
             let size = partition_size(&stock)?;
             let mut img = BootImage::read(&stock)?;
             // The ramdisk is written back compressed the way the phone's own
@@ -178,6 +185,18 @@ fn main() -> Result<()> {
                 rd.add(paths::TASK_PROFILES, 0o644, TASK_PROFILES.to_vec())?;
             }
             rd.add(paths::MTP_RC, 0o644, MTP_RC.to_vec())?;
+            // A boot partition's ramdisk holds the first stage of the
+            // installed system, which is what init looks for to tell a
+            // start of the system from a start of the recovery: with the
+            // folder there it lays out the system and hands over, and
+            // without it the kernel's ramdisk is the whole of the root and
+            // init runs the recovery's own script. Dropping the folder is
+            // what makes this image come up in the recovery by itself,
+            // with no request in misc for the bootloader to read, as a
+            // recovery image built for a partition of its own does.
+            if as_recovery {
+                rd.remove_tree(FIRST_STAGE)?;
+            }
             // On an unlocked device adbd keeps root when ro.secure is 0 and
             // lets any computer in without authorization when ro.adb.secure is
             // 0; init lets a later line of a property file override an earlier
@@ -189,7 +208,7 @@ fn main() -> Result<()> {
             // none of this is done to it: the build properties stay as the
             // phone's build wrote them, or the system would come up
             // debuggable and with adb needing no authorization.
-            if !as_boot {
+            if !as_boot || as_recovery {
                 let stock_props = &rd
                     .find(paths::PROP_DEFAULT)
                     .with_context(|| format!("{} is not in the ramdisk", paths::PROP_DEFAULT))?
@@ -237,6 +256,12 @@ fn main() -> Result<()> {
 
 /// The partition a recovery is made on, as a full update package names it.
 const RECOVERY: &str = "recovery";
+
+/// The folder init looks for to tell a start of the installed system from a
+/// start of the recovery: where it is, the ramdisk is the system's first
+/// stage and init lays the system out; where it is not, init reads the
+/// ramdisk as the recovery's own.
+const FIRST_STAGE: &str = "first_stage_ramdisk";
 
 /// Take the recovery partition out of the stock build's full update package
 /// on its server, reading only what that partition takes of it, and write it

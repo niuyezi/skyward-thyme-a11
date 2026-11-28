@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use cpio::{NewcBuilder, NewcReader};
 use std::ffi::{CString, OsStr};
 use std::fs;
@@ -193,6 +193,16 @@ impl Ramdisk {
             Some(_) => bail!("{name} is not a regular file"),
             None => bail!("{name} is not in the ramdisk"),
         }
+    }
+
+    /// Drop `name` and everything under it, as the kernel would find
+    /// nothing there: a folder's entries go with the folder.
+    pub fn remove_tree(&mut self, name: &str) -> Result<()> {
+        let before = self.entries.len();
+        let prefix = format!("{}/", name.trim_end_matches('/'));
+        self.entries.retain(|e| e.name != name && !e.name.starts_with(&prefix));
+        ensure!(self.entries.len() != before, "{name} is not in the ramdisk");
+        Ok(())
     }
 
     /// Add a root-owned regular file, creating missing parent directories.
