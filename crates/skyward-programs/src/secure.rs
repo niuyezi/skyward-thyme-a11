@@ -87,6 +87,11 @@ const OPENERS: [&str; 2] = ["ssgtzd", "hlosminkdaemon"];
 /// knows it under, and the property it sets once it takes calls.
 const HARDWARE_DIRECTORY: &str = "hwservicemanager";
 const HARDWARE_DIRECTORY_READY: &str = "hwservicemanager.ready";
+/// Where the recovery keeps the directory for hardware services, for a
+/// phone whose system partition is not among those the recovery reads the
+/// scripts of: the directory is a program of the system partition, which
+/// the recovery carries itself and starts from here.
+const SYSTEM_DIRECTORY_PROGRAM: &str = "/system/bin/hwservicemanager";
 
 /// The folders a program's libraries are looked for in, by the partition
 /// the program is on: the recovery's own come before the vendor
@@ -196,12 +201,23 @@ pub fn steps(phone: &Phone) -> Result<Vec<Step>> {
     // started before the directory is up ends where it cannot register,
     // again and again, which leaves nothing for the recovery to reach.
     if keys_kind == Kind::Hidl || credentials_kind == Kind::Hidl || boot_kind == Kind::Hidl {
-        let directory = phone
-            .programs
-            .iter()
-            .find(|p| p.name == HARDWARE_DIRECTORY && phone.carries(p))
-            .context("the phone has hardware services of the older kind, and no directory for them among the programs its scripts name")?;
-        start(&mut out, started(phone, directory, Ready::Property(HARDWARE_DIRECTORY_READY), Vec::new()));
+        match phone.programs.iter().find(|p| p.name == HARDWARE_DIRECTORY && phone.carries(p)) {
+            Some(directory) => start(&mut out, started(phone, directory, Ready::Property(HARDWARE_DIRECTORY_READY), Vec::new())),
+            // A phone whose directory is on the system partition describes
+            // it in no script the recovery reads: the directory is then the
+            // recovery's own program, started from where the recovery keeps
+            // it, with the libraries a program of the system partition
+            // finds its own in.
+            None => {
+                let service = Service {
+                    path: SYSTEM_DIRECTORY_PROGRAM.to_string(),
+                    libraries: libraries_of(SYSTEM_DIRECTORY_PROGRAM, phone.bundle.as_deref()),
+                    ready_property: Some(HARDWARE_DIRECTORY_READY.to_string()),
+                    ..Default::default()
+                };
+                start(&mut out, Started::from(service));
+            }
+        }
     }
     let keys = match keys_kind {
         Kind::Aidl => behind(phone, "the key service", &keys_name, |file| file.contains("keymint") && !file.contains("strongbox"))?,

@@ -160,7 +160,16 @@ fn describe_hardware(wanted: &[String]) -> Result<String> {
 /// need no bundle has none to open.
 pub fn libraries() -> Result<Option<PathBuf>> {
     let Some(version) = skyward_sys::prop(VENDOR_INTERFACE) else { return Ok(None) };
-    Ok(bundle(&format!("com.android.vndk.v{version}"))?.map(|at| at.join(BUNDLE_LIBS)))
+    // A phone names its bundle by the version its vendor interface says,
+    // or by "current" alone: the installed system's own init resolves
+    // that name to the same bundle, and a phone that carries only the
+    // one name has its bundle under it.
+    for name in [format!("com.android.vndk.v{version}"), "com.android.vndk.current".to_string()] {
+        if let Some(at) = bundle(&name)? {
+            return Ok(Some(at.join(BUNDLE_LIBS)));
+        }
+    }
+    Ok(None)
 }
 
 /// Open the bundle of this name where it lies, and give where it is. A
