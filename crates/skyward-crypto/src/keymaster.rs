@@ -29,11 +29,16 @@ const INSTANCE: &str = "default";
 /// later versions append to this, so these numbers hold for every one.
 const GET_HARDWARE_INFO: u32 = 1;
 const GET_KEY_CHARACTERISTICS: u32 = 9;
+const EXPORT_KEY: u32 = 10;
 const UPGRADE_KEY: u32 = 12;
 const BEGIN: u32 = 16;
 const UPDATE: u32 = 17;
 const FINISH: u32 = 18;
 const ABORT: u32 = 19;
+
+/// How a key is asked to be given out: as raw bytes, which is how a
+/// symmetric key the storage hardware reads comes back.
+const KEY_FORMAT_RAW: u32 = 3;
 
 /// The key service's way of saying the key was made under an older build of
 /// the phone's own firmware and has to be renewed before it will be used.
@@ -236,12 +241,27 @@ impl<'a> Keymaster<'a> {
         Ok(Hardware { version: 4, security_level: level, name, author })
     }
 
-    /// Android 11 stores a key blob the hardware holds whole, and hands it
-    /// straight back to begin() or upgradeKey(); there is no
-    /// convertStorageKey as KeyMint has. So a storage key is already in the
-    /// form this start of the phone takes, and is given back as it is.
+    /// The form of a storage key that lasts until the phone is started
+    /// again: the key service unwraps the key blob the phone keeps and
+    /// hands back what the storage hardware reads it through, wrapped for
+    /// this start only. Android 11's own storage code names this the
+    /// ephemeral wrapped key, and asks for it under `KeyFormat::RAW`, with
+    /// nothing bound to the request; what comes back is at most 128 bytes,
+    /// which is all the storage hardware's mapping takes.
     pub fn ephemeral_storage_key(&self, key: &[u8]) -> Result<Vec<u8>> {
-        Ok(key.to_vec())
+        let mut call = Message::call(HARDWARE_SERVICE);
+        call.u32(KEY_FORMAT_RAW);
+        call.bytes(key);
+        call.bytes(&[]);
+        call.bytes(&[]);
+        let reply = self.device.transact(EXPORT_KEY, &call).context("unwrap the storage key for this start")?;
+        let mut read = Answer::new(reply.bytes());
+        read.status().context("unwrap the storage key for this start")?;
+        let code = read.i32().context("read how the key service took the export")?;
+        if code != 0 {
+            bail!("{}", fault(code));
+        }
+        Ok(read.blob().context("read the key wrapped for this start")?.to_vec())
     }
 
     /// What the key service says a key may be used for: each entry is a tag
