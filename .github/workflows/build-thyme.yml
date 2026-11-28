@@ -124,7 +124,7 @@ jobs:
             --mono resources/fonts/KirkMono-Regular.ttf \
             --mono-license resources/fonts/KirkMono-OFL.txt \
             --partition boot \
-            --as-recovery \
+            --as-boot \
             --out "out/$name.img"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
