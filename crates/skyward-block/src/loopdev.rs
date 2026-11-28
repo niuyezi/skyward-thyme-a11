@@ -24,9 +24,6 @@ mod android {
     /// The device only ever reads. It stays pointed at the file until the
     /// recovery ends, which is as long as anything mounted from it lasts.
     const READ_ONLY: u32 = 1;
-    /// The device goes away once nothing is mounted from it, as the newer
-    /// call's device does.
-    const AUTOCLEAR: u32 = 4;
 
     /// Every field is a plain number or a run of bytes, so the request is
     /// made by zeroing it and filling in what matters.
@@ -127,7 +124,10 @@ mod android {
         let mut status: Status = unsafe { std::mem::zeroed() };
         status.offset = offset;
         status.size_limit = length;
-        status.flags = READ_ONLY | AUTOCLEAR;
+        // No AUTOCLEAR: the device is let go of here, and a device marked
+        // with it goes away as the last of whoever holds it lets go, which
+        // is this, before anything is mounted from it.
+        status.flags = READ_ONLY;
         if unsafe { libc::ioctl(device.as_raw_fd(), SET_STATUS as libc::Ioctl, &mut status) } < 0 {
             return Err(std::io::Error::last_os_error()).with_context(|| format!("tell {} where to read", path.display()));
         }
